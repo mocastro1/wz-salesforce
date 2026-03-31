@@ -1,0 +1,76 @@
+{
+  "name": "Consulta Lead por Telefone WZ",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wz-lead-lookup",
+        "options": {},
+        "responseMode": "lastNode"
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "id": "webhook-lookup",
+      "name": "Webhook Lookup"
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = items[0].json.body || items[0].json;\nconst instanceUrl = body.sfInstanceUrl || '';\nconst rawPhone = (body.phone || '').replace(/\\D/g, '');\nconst tokenType = body.sfTokenType || 'Bearer';\nconst accessToken = body.sfAccessToken || '';\n\n// WhatsApp vem sem o 9 de celular\n// Ex: 556592988342 (12 dígitos) → precisa virar 5565992988342 (13 dígitos)\n// 55 + DDD(65) + 9 + resto(92988342)\nlet phoneWithNine = rawPhone;\nif (rawPhone.length === 12 && rawPhone.startsWith('55')) {\n  const withoutCountry = rawPhone.substring(2);\n  const ddd = withoutCountry.substring(0, 2);\n  const resto = withoutCountry.substring(2);\n  phoneWithNine = '55' + ddd + '9' + resto;\n}\n\n// Pega os últimos 11 dígitos para LIKE\nconst phone11 = phoneWithNine.slice(-11);\n\nconst soql = `SELECT Id, Name, Phone, MobilePhone, beetalk__PhoneOrMobilePhone__c, Status, LeadSource, Company, OwnerId FROM Lead WHERE beetalk__PhoneOrMobilePhone__c LIKE '%${phone11}' LIMIT 1`;\n\nconst apiUrl = instanceUrl + '/services/data/v58.0/query/?q=' + encodeURIComponent(soql);\n\nitems[0].json.sfQueryUrl = apiUrl;\nitems[0].json.sfToken = tokenType + ' ' + accessToken;\nitems[0].json.sfInstanceUrl = instanceUrl;\nitems[0].json.phoneSearched = rawPhone;\nitems[0].json.phoneWithNine = phoneWithNine;\nitems[0].json.phone11 = phone11;\n\nreturn items;"
+      },
+      "name": "Prepare SOQL Query",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [550, 300],
+      "id": "prepare-soql"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$json.sfQueryUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{$json.sfToken}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Query Salesforce",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300],
+      "id": "http-query"
+    },
+    {
+      "parameters": {
+        "functionCode": "const item = items[0].json;\nconst records = item.records || [];\nconst totalSize = item.totalSize || 0;\n// Recupera dados do nó anterior (perdidos após o nó HTTP)\nconst prevNode = $node['Prepare SOQL Query'].json;\nconst phoneSearched = prevNode.phoneSearched || '';\nconst phoneWithNine = prevNode.phoneWithNine || '';\nconst instanceUrl = prevNode.sfInstanceUrl || '';\n\nif (totalSize > 0 && records.length > 0) {\n  const lead = records[0];\n  const leadId = lead.Id;\n  let lightningUrl = instanceUrl.replace('.my.salesforce.com', '.lightning.force.com');\n  const leadUrl = lightningUrl + '/lightning/r/Lead/' + leadId + '/view';\n\n  return [{\n    json: {\n      found: true,\n      leadId: leadId,\n      leadName: lead.Name || '',\n      leadPhone: lead.Phone || '',\n      leadMobile: lead.MobilePhone || '',\n      beetalkPhone: lead.beetalk__PhoneOrMobilePhone__c || '',\n      leadStatus: lead.Status || '',\n      leadSource: lead.LeadSource || '',\n      leadCompany: lead.Company || '',\n      leadUrl: leadUrl,\n      phoneSearched: phoneSearched,\n      phoneWithNine: phoneWithNine\n    }\n  }];\n} else {\n  return [{\n    json: {\n      found: false,\n      leadId: null,\n      leadName: null,\n      leadUrl: null,\n      phoneSearched: phoneSearched,\n      phoneWithNine: phoneWithNine,\n      message: 'Nenhum Lead encontrado para o telefone ' + phoneWithNine\n    }\n  }];\n}"
+      },
+      "name": "Format Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "id": "format-response"
+    }
+  ],
+  "connections": {
+    "Webhook Lookup": {
+      "main": [[{ "node": "Prepare SOQL Query", "type": "main", "index": 0 }]]
+    },
+    "Prepare SOQL Query": {
+      "main": [[{ "node": "Query Salesforce", "type": "main", "index": 0 }]]
+    },
+    "Query Salesforce": {
+      "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" }
+}
