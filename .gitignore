@@ -1,0 +1,22 @@
+# Salesforce CLI / SFDX metadata (gerado automaticamente, não versionar)
+.sfdx/
+.sf/
+
+# Visual base — dependências e build
+visual_base/node_modules/
+visual_base/.next/
+visual_base/out/
+visual_base/.env
+visual_base/.env.local
+
+# Nova pasta temporária
+Nova pasta/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/settings.json
+*.log
