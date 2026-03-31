@@ -614,6 +614,15 @@ function extractContactInfo() {
     phone = phoneRaw.replace(/\D/g, '');
   }
 
+  // Se o telefone ainda não foi encontrado mas o nome parece um número
+  // (ex: "+55 65 9605-4118" ou "11 98598-6627"), extrai os dígitos do nome
+  if (!phone && name) {
+    const digitsFromName = name.replace(/\D/g, '');
+    if (digitsFromName.length >= 8) {
+      phone = digitsFromName;
+    }
+  }
+
   return { name, phone };
 }
 
@@ -1098,6 +1107,12 @@ async function handleAction(action, contact, conversation, panel) {
   const now = new Date().toISOString();
   const nowBR = new Date().toLocaleString('pt-BR');
   const [first, ...rest] = (confirmed.name || 'Desconhecido').split(' ');
+
+  // Validação client-side antes de enviar à API
+  if (!confirmed.phone || confirmed.phone.replace(/\D/g, '').length < 8) {
+    setStatus(status, 'error', '❌ Telefone inválido ou não detectado. Corrija o número no modal.');
+    return;
+  }
 
   disableButtons(panel, true);
   setStatus(status, 'loading', '⏳ Enviando ao n8n...');
