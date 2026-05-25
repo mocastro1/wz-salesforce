@@ -239,6 +239,23 @@ async function lookupLead(data) {
   return apiFetch('lookupLead', { phone: data.phone });
 }
 
+// ─── Desqualificação de Lead ou Oportunidade ─────────────────
+async function disqualifyRecord(data) {
+  // data = { objectType: 'Lead'|'Opportunity', recordId, motivoDePerda }
+  return apiFetch('disqualify', {
+    objectType:    data.objectType,
+    recordId:      data.recordId,
+    motivoDePerda: data.motivoDePerda,
+  });
+}
+
+async function getDisqualifyPicklist(data) {
+  // Busca picklist de motivo de perda para Lead ou Opportunity
+  const objectName = data?.objectType || 'Lead';
+  const path = API_CONFIG.endpoints.disqualifyPicklist + '?object=' + encodeURIComponent(objectName);
+  return apiFetch(path, null, 'GET');
+}
+
 // ─── Telemetry — batch de eventos para detectar mudanças do WA ────
 // Acumula eventos e envia em lote a cada 30s ou quando atinge 20 eventos.
 // Dedup por (type+context) em janela de 5 min para evitar spam.
@@ -355,6 +372,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return { ok: true, ...sfUserData };
     },
     getPicklist: (msg) => getPicklist(msg?.data?.field || msg?.field || 'Interesse_em__c'),
+
+    disqualify:            () => disqualifyRecord(msg.data || {}),
+    getDisqualifyPicklist: () => getDisqualifyPicklist(msg.data || {}),
 
     reportTelemetry: () => {
       const events = Array.isArray(msg.events) ? msg.events : (msg.event ? [msg.event] : []);

@@ -19,6 +19,8 @@ const API_CONFIG = {
     logs:                 '/api/logs',
     authCheck:            '/api/auth/check',
     telemetry:            '/api/telemetry',
+    disqualify:           '/api/disqualify',
+    disqualifyPicklist:   '/api/disqualify/picklist',
   },
 
   url(endpoint) {

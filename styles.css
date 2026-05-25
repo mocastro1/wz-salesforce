@@ -1008,3 +1008,122 @@
 .wzsf-btn-ghost .wzsf-icon svg {
   color: #64748B;
 }
+
+/* =============================================
+   BOTÃO DE DESQUALIFICAÇÃO
+   ============================================= */
+
+.wzsf-btn-danger {
+  width: 100%;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1.5px solid #FECACA;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #DC2626;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 150ms ease-out;
+  line-height: 1.25;
+}
+
+.wzsf-btn-danger:hover {
+  background: #FEF2F2;
+  border-color: #FCA5A5;
+  color: #B91C1C;
+}
+
+.wzsf-btn-danger:active {
+  transform: scale(0.98);
+}
+
+.wzsf-btn-danger:disabled {
+  background: #F1F5F9;
+  color: #94A3B8;
+  border-color: #E2E8F0;
+  cursor: not-allowed;
+}
+
+/* Toggle group de tipo (Lead / Oportunidade) */
+.wzsf-type-toggle {
+  display: flex;
+  background: #F1F5F9;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+  margin-bottom: 12px;
+}
+
+.wzsf-type-btn {
+  flex: 1;
+  padding: 7px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748B;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.wzsf-type-btn.active {
+  background: #ffffff;
+  color: #DC2626;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  font-weight: 600;
+}
+
+.wzsf-type-btn:hover:not(.active) {
+  color: #334155;
+}
+
+/* Modal de desqualificação — largura um pouco maior */
+.wzsf-disqualify-box {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 22px 24px;
+  width: 340px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.22);
+  animation: wzsf-slide-up 0.18s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #1E293B;
+  color-scheme: light;
+}
+
+.wzsf-disqualify-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #DC2626;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wzsf-disqualify-subtitle {
+  font-size: 12px;
+  color: #64748B;
+  margin-bottom: 16px;
+}
+
+.wzsf-disqualify-loading {
+  text-align: center;
+  color: #64748B;
+  font-size: 13px;
+  padding: 20px 0;
+}
+
+.wzsf-disqualify-error {
+  color: #DC2626;
+  font-size: 12px;
+  padding: 8px 10px;
+  background: #FEF2F2;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}

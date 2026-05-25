@@ -5,7 +5,7 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.2.0';
+const VERSION  = 'v2.3.0';
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -356,6 +356,9 @@ async function lookupLeadByPhone(phone) {
 function updateLeadBadge() {
   const panel = document.getElementById(PANEL_ID);
   if (!panel) return;
+
+  // Atualiza visibilidade do botão Desqualificar sempre que o badge muda
+  updateDisqualifyButton();
 
   const card = panel.querySelector('.wzsf-card');
   if (!card) return;
@@ -1491,6 +1494,10 @@ function createPanel() {
             <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
             Abrir no Salesforce
           </button>
+          <button class="wzsf-btn-danger wzsf-hidden" data-action="disqualify" id="wzsf-btn-disqualify">
+            <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>
+            Desqualificar
+          </button>
         </div>
 
         <!-- Status -->
@@ -1624,6 +1631,12 @@ async function handleAction(action, contact, conversation, panel) {
     return;
   }
 
+  // "Desqualificar" — abre modal de desqualificação
+  if (action === 'disqualify') {
+    await handleDisqualify(panel);
+    return;
+  }
+
   const confirmed = await showConfirmModal(contact, action);
   if (!confirmed) return;
 
@@ -1751,6 +1764,301 @@ function clearStatus(el) {
 }
 function disableButtons(panel, disable) {
   panel.querySelectorAll('[data-action]').forEach(b => b.disabled = disable);
+}
+
+// ─── Mostrar/ocultar botão Desqualificar conforme lead ────────
+// Aparece quando:
+//   • Há um Lead ativo (não encerrado, sem motivo de perda)
+//   • OU há uma Oportunidade aberta (não encerrada, não faturada)
+function updateDisqualifyButton() {
+  const btn = document.querySelector('#wzsf-btn-disqualify');
+  if (!btn) return;
+
+  // Lead ativo: existe, não convertido com motivo de perda, não encerrado
+  const hasActiveLead = !!(
+    currentLeadInfo?.leadId &&
+    !currentLeadInfo.motivoPerda &&
+    !currentLeadInfo.isConverted
+  );
+
+  // Oportunidade aberta: existe e não está encerrada/faturada
+  const opp = currentLeadInfo?.opportunity;
+  const hasOpenOpp = !!(
+    opp?.oppId &&
+    !opp.motivoPerda &&
+    !opp.cotacaoFaturada &&
+    opp.stageName !== 'Negociação perdida'
+  );
+
+  if (hasActiveLead || hasOpenOpp) {
+    btn.classList.remove('wzsf-hidden');
+  } else {
+    btn.classList.add('wzsf-hidden');
+  }
+}
+
+// ─── Modal de desqualificação ─────────────────────────────────
+const DISQUALIFY_MODAL_ID = 'wzsf-disqualify-modal';
+
+async function handleDisqualify(panel) {
+  const status = panel.querySelector('.wzsf-status');
+
+  // Determina o que está disponível
+  const hasLead = !!(currentLeadInfo?.leadId && !currentLeadInfo.motivoPerda && !currentLeadInfo.isConverted);
+  const hasOpportunity = !!(currentLeadInfo?.opportunity?.oppId && !currentLeadInfo.opportunity?.motivoPerda && !currentLeadInfo.opportunity?.cotacaoFaturada);
+
+  if (!hasLead && !hasOpportunity) {
+    setStatus(status, 'error', '❌ Nenhum Lead ou Oportunidade encontrado para desqualificar.');
+    setTimeout(() => clearStatus(status), 4000);
+    return;
+  }
+
+  const result = await showDisqualifyModal(hasLead, hasOpportunity);
+  if (!result) return; // cancelado
+
+  const { objectType, motivoDePerda } = result;
+
+  // Determina o recordId com base no tipo escolhido
+  const recordId = objectType === 'Lead'
+    ? currentLeadInfo?.leadId
+    : currentLeadInfo?.opportunity?.oppId;
+
+  if (!recordId) {
+    setStatus(status, 'error', `❌ ID do ${objectType} não encontrado.`);
+    setTimeout(() => clearStatus(status), 4000);
+    return;
+  }
+
+  disableButtons(panel, true);
+  setStatus(status, 'loading', `⏳ Desqualificando ${objectType}...`);
+
+  try {
+    const resp = await sendMessage({
+      action: 'disqualify',
+      data: { objectType, recordId, motivoDePerda },
+    });
+
+    if (resp?.ok) {
+      setStatus(status, 'success', `✅ ${objectType} desqualificado com sucesso!`);
+      // Atualiza o badge/lead info
+      lastLookupPhone = null;
+      currentLeadInfo = null;
+      updateLeadBadge();
+      const contact = extractContactInfo();
+      if (contact.phone) setTimeout(() => lookupLeadByPhone(contact.phone), 1500);
+    } else {
+      setStatus(status, 'error', `❌ ${resp?.error || 'Erro ao desqualificar'}`);
+    }
+  } catch (e) {
+    setStatus(status, 'error', `❌ ${e.message}`);
+  } finally {
+    disableButtons(panel, false);
+    setTimeout(() => clearStatus(status), 7000);
+  }
+}
+
+// Modal de seleção de tipo + motivo de perda
+function showDisqualifyModal(hasLead, hasOpportunity) {
+  return new Promise(async resolve => {
+    document.getElementById(DISQUALIFY_MODAL_ID)?.remove();
+
+    // Tipo padrão: Lead se disponível, senão Opportunity
+    let currentType = hasLead ? 'Lead' : 'Opportunity';
+    let picklistValues = [];
+    let selectedMotivo = '';
+
+    const modal = document.createElement('div');
+    modal.id = DISQUALIFY_MODAL_ID;
+
+    const renderModal = (loading = true, errorMsg = '') => {
+      const leadTabActive  = currentType === 'Lead' ? 'active' : '';
+      const oppTabActive   = currentType === 'Opportunity' ? 'active' : '';
+      const leadTabDisabled  = !hasLead ? 'disabled style="opacity:.4;pointer-events:none;"' : '';
+      const oppTabDisabled   = !hasOpportunity ? 'disabled style="opacity:.4;pointer-events:none;"' : '';
+
+      const subtitleMap = {
+        Lead: 'Status → "Não qualificado"',
+        Opportunity: 'Etapa → "Negociação perdida"',
+      };
+
+      let bodyHtml = '';
+      if (loading) {
+        bodyHtml = `<div class="wzsf-disqualify-loading">⏳ Carregando motivos...</div>`;
+      } else if (errorMsg) {
+        bodyHtml = `<div class="wzsf-disqualify-error">⚠️ ${escHtml(errorMsg)}</div>`;
+      } else if (picklistValues.length === 0) {
+        bodyHtml = `<div class="wzsf-disqualify-error">Nenhum motivo cadastrado no Salesforce para ${currentType}.</div>`;
+      } else {
+        bodyHtml = `
+          <label class="wzsf-label">
+            Motivo de Perda
+            <div class="wzsf-custom-select" id="wzsf-dq-select" tabindex="0">
+              <div class="wzsf-custom-select__trigger" id="wzsf-dq-trigger">
+                <span id="wzsf-dq-label">-- Selecione --</span>
+                <svg class="wzsf-custom-select__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+              <div class="wzsf-custom-select__dropdown" id="wzsf-dq-dropdown">
+                <div class="wzsf-custom-select__option wzsf-custom-select__option--placeholder" data-value="">-- Selecione --</div>
+                ${picklistValues.map(v => `<div class="wzsf-custom-select__option" data-value="${escHtml(v.value)}">${escHtml(v.label)}</div>`).join('')}
+              </div>
+            </div>
+          </label>`;
+      }
+
+      modal.innerHTML = `
+        <div class="wzsf-overlay" id="wzsf-dq-overlay">
+          <div class="wzsf-disqualify-box">
+            <div class="wzsf-disqualify-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+              Desqualificar
+            </div>
+            <div class="wzsf-disqualify-subtitle">${subtitleMap[currentType]}</div>
+
+            <div class="wzsf-type-toggle">
+              <button class="wzsf-type-btn ${leadTabActive}" id="wzsf-dq-tab-lead" ${leadTabDisabled}>
+                👤 Lead
+              </button>
+              <button class="wzsf-type-btn ${oppTabActive}" id="wzsf-dq-tab-opp" ${oppTabDisabled}>
+                💼 Oportunidade
+              </button>
+            </div>
+
+            ${bodyHtml}
+
+            <div class="wzsf-modal-actions">
+              <button id="wzsf-dq-cancel" class="wzsf-btn-ghost">Cancelar</button>
+              <button id="wzsf-dq-confirm" class="wzsf-btn-danger" ${(loading || picklistValues.length === 0) ? 'disabled' : ''}>
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
+    // Render inicial (loading)
+    renderModal(true);
+    document.body.appendChild(modal);
+
+    // Função para vincular eventos (chamada após cada re-render)
+    const bindEvents = () => {
+      // Fecha ao clicar no overlay
+      modal.querySelector('#wzsf-dq-overlay')?.addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) { modal.remove(); resolve(null); }
+      });
+
+      // Botão cancelar
+      modal.querySelector('#wzsf-dq-cancel')?.addEventListener('click', () => {
+        modal.remove(); resolve(null);
+      });
+
+      // Botão confirmar
+      modal.querySelector('#wzsf-dq-confirm')?.addEventListener('click', () => {
+        if (!selectedMotivo) {
+          modal.querySelector('#wzsf-dq-trigger')?.focus();
+          return;
+        }
+        modal.remove();
+        resolve({ objectType: currentType, motivoDePerda: selectedMotivo });
+      });
+
+      // Tabs Lead / Oportunidade
+      modal.querySelector('#wzsf-dq-tab-lead')?.addEventListener('click', async () => {
+        if (currentType === 'Lead') return;
+        currentType = 'Lead';
+        selectedMotivo = '';
+        renderModal(true);
+        bindEvents();
+        await loadPicklist();
+      });
+
+      modal.querySelector('#wzsf-dq-tab-opp')?.addEventListener('click', async () => {
+        if (currentType === 'Opportunity') return;
+        currentType = 'Opportunity';
+        selectedMotivo = '';
+        renderModal(true);
+        bindEvents();
+        await loadPicklist();
+      });
+
+      // Custom select dropdown
+      const dqSelect = modal.querySelector('#wzsf-dq-select');
+      if (dqSelect) {
+        const trigger  = dqSelect.querySelector('#wzsf-dq-trigger');
+        const labelEl  = dqSelect.querySelector('#wzsf-dq-label');
+        const dropdown = dqSelect.querySelector('#wzsf-dq-dropdown');
+        const options  = dropdown?.querySelectorAll('.wzsf-custom-select__option') || [];
+
+        const openSelect = () => dqSelect.classList.add('wzsf-custom-select--open');
+        const closeSelect = () => dqSelect.classList.remove('wzsf-custom-select--open');
+
+        trigger?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          dqSelect.classList.toggle('wzsf-custom-select--open');
+        });
+        dqSelect?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') openSelect();
+          if (e.key === 'Escape') closeSelect();
+        });
+        document.addEventListener('click', closeSelect, { once: true });
+
+        options.forEach(opt => {
+          opt.addEventListener('click', () => {
+            selectedMotivo = opt.dataset.value || '';
+            labelEl.textContent = opt.textContent.trim();
+            options.forEach(o => o.classList.remove('wzsf-custom-select__option--selected'));
+            if (selectedMotivo) opt.classList.add('wzsf-custom-select__option--selected');
+            closeSelect();
+
+            // Habilita o confirmar
+            const confirmBtn = modal.querySelector('#wzsf-dq-confirm');
+            if (confirmBtn) confirmBtn.disabled = !selectedMotivo;
+          });
+        });
+
+        // Restaura seleção anterior se re-renderizou com mesma lista
+        if (selectedMotivo && labelEl) {
+          const found = [...options].find(o => o.dataset.value === selectedMotivo);
+          if (found) {
+            labelEl.textContent = found.textContent.trim();
+            found.classList.add('wzsf-custom-select__option--selected');
+          }
+        }
+      }
+    };
+
+    bindEvents();
+
+    // Carrega picklist via background
+    const loadPicklist = async () => {
+      try {
+        const resp = await sendMessage({
+          action: 'getDisqualifyPicklist',
+          data: { objectType: currentType },
+        });
+        if (resp?.ok && resp?.values?.length > 0) {
+          picklistValues = resp.values;
+          renderModal(false);
+        } else {
+          picklistValues = [];
+          const errMsg = resp?.error || `Nenhum motivo encontrado para ${currentType}`;
+          renderModal(false, errMsg);
+        }
+      } catch (e) {
+        picklistValues = [];
+        renderModal(false, e.message);
+      }
+      bindEvents();
+    };
+
+    await loadPicklist();
+
+    // Fechar com Escape
+    const escHandler = (e) => {
+      if (e.key === 'Escape') { modal.remove(); resolve(null); document.removeEventListener('keydown', escHandler); }
+    };
+    document.addEventListener('keydown', escHandler);
+  });
 }
 
 // ─── Modal de confirmação ────────────────────────────────────
