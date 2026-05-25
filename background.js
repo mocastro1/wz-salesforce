@@ -239,6 +239,73 @@ async function lookupLead(data) {
   return apiFetch('lookupLead', { phone: data.phone });
 }
 
+// ─── Telemetry — batch de eventos para detectar mudanças do WA ────
+// Acumula eventos e envia em lote a cada 30s ou quando atinge 20 eventos.
+// Dedup por (type+context) em janela de 5 min para evitar spam.
+const TELEMETRY_FLUSH_INTERVAL_MS = 30000;
+const TELEMETRY_MAX_BATCH = 20;
+const TELEMETRY_DEDUP_WINDOW_MS = 5 * 60 * 1000;
+
+let telemetryQueue = [];
+let telemetryDedup = new Map(); // key -> timestamp
+let telemetryFlushTimer = null;
+
+function telemetryDedupKey(ev) {
+  return `${ev.type}|${ev.context}`;
+}
+
+function enqueueTelemetry(ev) {
+  if (!ev || !ev.type) return;
+  const key = telemetryDedupKey(ev);
+  const now = Date.now();
+  const lastSeen = telemetryDedup.get(key);
+  if (lastSeen && (now - lastSeen) < TELEMETRY_DEDUP_WINDOW_MS) return;
+  telemetryDedup.set(key, now);
+
+  // Limpa entradas antigas do dedup
+  if (telemetryDedup.size > 200) {
+    for (const [k, ts] of telemetryDedup) {
+      if (now - ts > TELEMETRY_DEDUP_WINDOW_MS) telemetryDedup.delete(k);
+    }
+  }
+
+  telemetryQueue.push({ ...ev, ts: new Date().toISOString() });
+
+  if (telemetryQueue.length >= TELEMETRY_MAX_BATCH) {
+    flushTelemetry();
+  } else if (!telemetryFlushTimer) {
+    telemetryFlushTimer = setTimeout(flushTelemetry, TELEMETRY_FLUSH_INTERVAL_MS);
+  }
+}
+
+async function flushTelemetry() {
+  if (telemetryFlushTimer) {
+    clearTimeout(telemetryFlushTimer);
+    telemetryFlushTimer = null;
+  }
+  if (telemetryQueue.length === 0) return;
+
+  const batch = telemetryQueue.splice(0, telemetryQueue.length);
+  try {
+    const url = API_CONFIG.url('telemetry');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${API_CONFIG.apiToken}`,
+      },
+      body: JSON.stringify({ events: batch }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+  } catch (e) {
+    // Telemetry é best-effort — não bloqueia o fluxo principal
+    console.warn('[WZ-SF bg] Telemetry flush falhou:', e.message);
+  }
+}
+
 // ─── Listener de mensagens ───────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const handlers = {
@@ -288,6 +355,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return { ok: true, ...sfUserData };
     },
     getPicklist: (msg) => getPicklist(msg?.data?.field || msg?.field || 'Interesse_em__c'),
+
+    reportTelemetry: () => {
+      const events = Array.isArray(msg.events) ? msg.events : (msg.event ? [msg.event] : []);
+      events.forEach(enqueueTelemetry);
+      return Promise.resolve({ ok: true, queued: events.length });
+    },
   };
 
   const handler = handlers[msg.action];

@@ -5,7 +5,7 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.1.0';
+const VERSION  = 'v2.2.0';
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -17,6 +17,35 @@ let sellerPhone = ''; // Telefone do vendedor logado no WhatsApp
 let currentLeadInfo = null;  // Dados do Lead encontrado no SF
 let lookupInProgress = false; // Evita piscar durante a busca
 let lastLookupPhone = null;  // Último telefone pesquisado (evita re-busca desnecessária)
+
+// ─── Telemetry — reporta quando seletores/estratégias falham ───
+// Permite detectar mudanças no HTML do WhatsApp antes dos usuários reclamarem.
+// Throttle local: cada (type+context) só é reportado 1x por minuto.
+const telemetrySeen = new Map();
+const TELEMETRY_LOCAL_THROTTLE_MS = 60 * 1000;
+
+function reportTelemetry(type, context, detail) {
+  try {
+    const key = `${type}|${context}`;
+    const now = Date.now();
+    const last = telemetrySeen.get(key);
+    if (last && (now - last) < TELEMETRY_LOCAL_THROTTLE_MS) return;
+    telemetrySeen.set(key, now);
+
+    const event = {
+      type,
+      context,
+      detail: detail || {},
+      extensionVersion: VERSION,
+      userAgent: navigator.userAgent.substring(0, 300),
+      url: location.href.substring(0, 300),
+    };
+    chrome.runtime.sendMessage({ action: 'reportTelemetry', event }, () => {
+      // Ignora erros (extension context invalidated, etc.)
+      if (chrome.runtime.lastError) {/* silent */}
+    });
+  } catch (_) {/* silent */}
+}
 
 // ─── Injetar script no contexto da página (acessa window.Store) ──
 function injectPageScript() {
@@ -44,6 +73,15 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (event.data?.type === 'WZSF_RESPONSE_MESSAGES') {
+    const cb = pendingMsgRequests.get(event.data.reqId);
+    if (cb) {
+      pendingMsgRequests.delete(event.data.reqId);
+      cb(event.data.data);
+    }
+    return;
+  }
+
   if (event.data?.type === 'WZSF_SELLER_PHONE') {
     if (event.data.phone && !sellerPhone) {
       sellerPhone = event.data.phone;
@@ -57,6 +95,15 @@ window.addEventListener('message', (event) => {
     storeStatus = event.data.status;
     console.log(`[WZ-SF ${VERSION}] Store: ${storeStatus} — ${event.data.detail}`);
     updateStoreIndicator();
+
+    // Telemetry: store_found (sucesso) ou store_unavailable (precisou cair pra DOM)
+    if (storeStatus === 'found') {
+      reportTelemetry('store_found', event.data.detail || 'webpack', {});
+    } else if (storeStatus === 'unavailable') {
+      reportTelemetry('store_unavailable', event.data.detail || 'webpack', {
+        attempts: event.data.attempts,
+      });
+    }
   }
 });
 
@@ -77,6 +124,25 @@ function updateStoreIndicator() {
 // Pede dados ao inject.js
 function requestStoreData() {
   window.postMessage({ type: 'WZSF_REQUEST' }, '*');
+}
+
+// Pede mensagens do chat ativo ao Store (Promise-based, timeout 2s)
+const pendingMsgRequests = new Map();
+let msgReqSeq = 0;
+
+function requestStoreMessages(limit = 50) {
+  return new Promise((resolve) => {
+    const reqId = ++msgReqSeq;
+    const timer = setTimeout(() => {
+      pendingMsgRequests.delete(reqId);
+      resolve({ messages: [], source: 'timeout' });
+    }, 2000);
+    pendingMsgRequests.set(reqId, (data) => {
+      clearTimeout(timer);
+      resolve(data || { messages: [], source: 'empty' });
+    });
+    window.postMessage({ type: 'WZSF_REQUEST_MESSAGES', limit, reqId }, '*');
+  });
 }
 
 injectPageScript();
@@ -186,27 +252,48 @@ function triggerSfLogin() {
     loginBtn.disabled = true;
     loginBtn.textContent = '⏳ Conectando...';
   }
+  // Fire-and-forget: o OAuth abre uma aba e pode demorar > 30s.
+  // O service worker MV3 pode ser suspendido nesse meio-tempo, fechando o canal
+  // de sendMessage. Em vez de esperar a resposta, confiamos no onChanged do
+  // chrome.storage (já registrado em content.js) — quando wzsf_auth muda, a UI atualiza.
   chrome.runtime.sendMessage({ action: 'sfLogin' }, (resp) => {
-    if (loginBtn) {
-      loginBtn.disabled = false;
-      loginBtn.textContent = '🔐 Login SF';
-    }
+    // Callback opcional — pode nunca chegar se o SW reiniciou. Não tratamos como erro.
     if (chrome.runtime.lastError) {
-      console.warn(`[WZ-SF] SF Login falhou:`, chrome.runtime.lastError?.message);
+      console.log(`[WZ-SF] sfLogin: canal fechou (service worker reiniciado) — aguardando storage update`);
       return;
     }
-    if (!resp?.ok) {
-      console.warn(`[WZ-SF] SF Login falhou:`, resp?.error);
-      alert('Erro no login: ' + (resp?.error || 'Tente novamente'));
-      return;
+    if (resp?.ok) {
+      console.log('[WZ-SF] Login Salesforce concluído! ✅');
+    } else if (resp?.error) {
+      console.warn(`[WZ-SF] SF Login falhou:`, resp.error);
+      alert('Erro no login: ' + resp.error);
     }
-    console.log('[WZ-SF] Login Salesforce concluído! ✅');
-    // Aguarda um pouco para garantir que o token foi salvo
-    setTimeout(() => {
-      checkSfAuthStatus();
-      updatePanel();
-    }, 1000);
   });
+
+  // Polling de fallback: verifica auth a cada 2s por até 2 minutos.
+  // Para o polling assim que detectar login ou ao expirar.
+  let pollCount = 0;
+  const maxPolls = 60; // 2 min @ 2s
+  const pollInterval = setInterval(() => {
+    pollCount++;
+    chrome.storage.local.get('wzsf_auth', (r) => {
+      if (r.wzsf_auth?.access_token) {
+        clearInterval(pollInterval);
+        if (loginBtn) {
+          loginBtn.disabled = false;
+          loginBtn.textContent = '🔐 Login SF';
+        }
+        checkSfAuthStatus();
+        updatePanel();
+      } else if (pollCount >= maxPolls) {
+        clearInterval(pollInterval);
+        if (loginBtn) {
+          loginBtn.disabled = false;
+          loginBtn.textContent = '🔐 Login SF';
+        }
+      }
+    });
+  }, 2000);
 }
 
 // Verifica auth SF a cada 60s (com guard contra context invalidated)
@@ -434,6 +521,17 @@ const SEL = {
     '#main header span[title] ~ span',
     '#main header div[title]',
   ],
+  // Painel "Dados do contato" (drawer lateral direito) — abre ao clicar no nome
+  // Esses seletores são muito mais estáveis que os do header
+  drawerContactName: [
+    '[data-testid="contact-info-subtitle"]',
+    '[data-testid="contact-info-name"]',
+    '[data-testid="conversation-info-header-chat-title"]',
+  ],
+  drawerContactPhone: [
+    // O telefone aparece no painel como selectable-text dentro do drawer
+    '[data-testid="selectable-text"]',
+  ],
 };
 
 // Busca o primeiro seletor que encontra algo no DOM
@@ -504,27 +602,44 @@ function getConversationContainer() {
 
 // Detecta se o chat atual é um grupo (@g.us) ou contato individual (@c.us)
 function isGroupChat() {
+  // 1) Store-first — definitivo, imune a mudanças no HTML
+  if (storeStatus === 'found' && storeData.source === 'store') {
+    return !!storeData.isGroup;
+  }
+
+  // 2) Fallback DOM: data-id das mensagens
   const mainEl = getConversationContainer();
   if (mainEl) {
     // Grupos usam @g.us nos data-id das mensagens
-    if (mainEl.querySelector('[data-id*="@g.us"]')) return true;
+    if (mainEl.querySelector('[data-id*="@g.us"]')) {
+      reportTelemetry('group_detection', 'fallback_dataid_gus', { isGroup: true });
+      return true;
+    }
     // Se tem @c.us é contato individual
     if (mainEl.querySelector('[data-id*="@c.us"]')) return false;
   }
 
-  // Fallback: subtítulo com vírgulas (lista de participantes) indica grupo
+  // 3) Fallback heurístico (frágil — strings localizadas)
   const subEl = queryFirst(SEL.contactSub);
   const sub = subEl?.getAttribute('title') || subEl?.textContent?.trim() || '';
-  // "clique para mostrar dados do grupo" é texto fixo de grupo
-  if (sub.includes('dados do grupo') || sub.includes('group info')) return true;
+  if (sub.includes('dados do grupo') || sub.includes('group info')) {
+    reportTelemetry('group_detection', 'fallback_localized_string', { isGroup: true });
+    return true;
+  }
   // Lista de participantes: 2+ vírgulas e não é horário
-  if ((sub.match(/,/g) || []).length >= 2 && !sub.includes(':')) return true;
+  if ((sub.match(/,/g) || []).length >= 2 && !sub.includes(':')) {
+    reportTelemetry('group_detection', 'fallback_comma_count', { isGroup: true });
+    return true;
+  }
 
-  // Header: nome do chat com ícone de grupo ou "participantes"
+  // 4) Último recurso: ícone de grupo no header
   const headerEl = queryFirst(SEL.header);
   if (headerEl) {
     const groupIcon = headerEl.querySelector('[data-testid="group"], [data-icon="group"], [data-testid="default-group"]');
-    if (groupIcon) return true;
+    if (groupIcon) {
+      reportTelemetry('group_detection', 'fallback_group_icon', { isGroup: true });
+      return true;
+    }
   }
 
   return false;
@@ -533,9 +648,12 @@ function isGroupChat() {
 // Textos do WhatsApp que NÃO são nomes de contato
 const STATUS_TEXTS = [
   'online', 'offline', 'digitando', 'typing', 'recording',
-  'gravando', 'visto por', 'last seen', 'clique para',
+  'gravando', 'visto por', 'visto por último', 'last seen', 'clique para',
   'click to', 'dados do contato', 'dados do grupo',
   'contact info', 'group info', 'mostrar dados',
+  'dados do perfil', 'profile info', 'profile data',
+  // Strings de hora/data que podem aparecer no subtítulo
+  'hoje às', 'ontem às', 'today at', 'yesterday at',
 ];
 
 function isStatusText(text) {
@@ -586,6 +704,229 @@ function extractPhoneFromDOM() {
   return '';
 }
 
+// ─── Auto-open do drawer "Dados do contato" para capturar telefone ───
+// Quando o contato salvo na agenda não tem mensagens trocadas, não temos data-id.
+// Solução: clicar programaticamente no header (que abre o drawer), ler o telefone,
+// e fechar o drawer com Escape. Tudo em < 500ms.
+//
+// Anti-loop: cacheamos por nome — evita ficar abrindo/fechando o drawer toda hora.
+const drawerCache = new Map(); // name -> { phone, ts }
+const drawerAttempted = new Set(); // conversationKeys já tentadas (anti-loop)
+const DRAWER_CACHE_TTL = 5 * 60 * 1000; // 5 min
+let drawerOpenInProgress = false;
+
+// Heurística extra forte para detectar grupo, independente do Store.
+// Usada como segunda linha de defesa contra auto-open em grupos.
+function isLikelyGroup(contact) {
+  // 1) Se temos qualquer @g.us em data-id, é grupo
+  if (document.querySelector('[data-id*="@g.us"]')) return true;
+
+  // 2) Se o nome contém múltiplas vírgulas (participantes), provavelmente é grupo
+  // ex: "João, Maria, Pedro, +5 outros"
+  const commaCount = (contact.name?.match(/,/g) || []).length;
+  if (commaCount >= 2) return true;
+
+  // 3) Procura ícone de grupo no header
+  const headerEl = queryFirst(SEL.header);
+  if (headerEl) {
+    // Ícones típicos de grupo no WhatsApp atual
+    if (headerEl.querySelector('[data-icon="default-group"], [data-icon="default-group-refreshed"], [aria-label*="rupo"]')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getDrawerCachedPhone(name) {
+  if (!name) return null;
+  const entry = drawerCache.get(name);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > DRAWER_CACHE_TTL) {
+    drawerCache.delete(name);
+    return null;
+  }
+  return entry.phone;
+}
+
+function setDrawerCachedPhone(name, phone) {
+  if (!name || !phone) return;
+  drawerCache.set(name, { phone, ts: Date.now() });
+  // Limita o tamanho do cache
+  if (drawerCache.size > 100) {
+    const oldestKey = drawerCache.keys().next().value;
+    drawerCache.delete(oldestKey);
+  }
+}
+
+// Abre o drawer programaticamente, lê o telefone, fecha.
+// Retorna Promise<phone string ou ''>
+async function openDrawerToReadPhone(contactName) {
+  // Anti-concurrent: se já está abrindo, não tenta de novo
+  if (drawerOpenInProgress) return '';
+  drawerOpenInProgress = true;
+
+  try {
+    // 1) Encontra o header da conversa (área clicável que abre o drawer)
+    const headerEl = queryFirst(SEL.header);
+    if (!headerEl) return '';
+
+    // 2) Encontra o elemento clicável que abre os dados do contato.
+    // Geralmente é o nome ou avatar no topo da conversa.
+    // Procura por divs/spans clicáveis dentro do header.
+    let clickTarget = null;
+    // Estratégia 1: o nome em si (geralmente role="button" ou tem cursor pointer)
+    const possibleTargets = headerEl.querySelectorAll('div[role="button"], [data-testid*="header"], div._aou3, div.x1n2onr6');
+    for (const el of possibleTargets) {
+      const text = (el.textContent || '').trim();
+      if (text && text.includes(contactName.split(' ')[0])) {
+        clickTarget = el;
+        break;
+      }
+    }
+    // Fallback: clica direto no headerEl ou no primeiro filho
+    if (!clickTarget) clickTarget = headerEl.firstElementChild || headerEl;
+
+    // 3) Clica para abrir o drawer
+    clickTarget.click();
+
+    // 4) Espera o drawer renderizar (poll rápido até 500ms)
+    const phone = await new Promise(resolve => {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        const drawerData = extractFromContactDrawer();
+        if (drawerData.phone) {
+          clearInterval(interval);
+          resolve(drawerData.phone);
+          return;
+        }
+        if (attempts >= 25) { // 25 * 20ms = 500ms
+          clearInterval(interval);
+          resolve('');
+        }
+      }, 20);
+    });
+
+    // 5) Fecha o drawer imediatamente (Escape) — sem delay artificial
+    document.body.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true,
+    }));
+
+    return phone;
+  } catch (e) {
+    console.warn('[WZ-SF] openDrawerToReadPhone falhou:', e.message);
+    return '';
+  } finally {
+    drawerOpenInProgress = false;
+  }
+}
+
+// Extrai dados do painel "Dados do contato" (drawer lateral).
+// Esse painel usa data-testid mais estáveis que o header.
+// Retorna { name, phone } — vazios se o painel não estiver aberto/visível.
+function extractFromContactDrawer() {
+  const result = { name: '', phone: '' };
+
+  // Tenta data-testid="contact-info-subtitle" — esse é o nome no drawer
+  for (const sel of SEL.drawerContactName) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const text = (el.textContent || '').trim();
+    if (text && !isStatusText(text) && text.length >= 2 && text.length <= 80) {
+      result.name = text;
+      break;
+    }
+  }
+
+  // Procura telefones (formato BR ou internacional) em selectable-text spans
+  // Restringe a busca: precisa estar perto de um drawerContactName se possível
+  document.querySelectorAll('[data-testid="selectable-text"]').forEach(el => {
+    if (result.phone) return;
+    const text = (el.textContent || '').trim();
+    // Telefone: começa com + ou tem dígitos formatados (XX XXX-XXXX)
+    if (!/^[\+\d\s()\-]{7,25}$/.test(text)) return;
+    const digits = text.replace(/\D/g, '');
+    if (digits.length >= 8 && digits.length <= 15) {
+      result.phone = digits;
+    }
+  });
+
+  return result;
+}
+
+// Extrai nome do contato do header — robusto contra mudanças do WhatsApp.
+// Estratégia: percorre todos os candidatos (spans/divs com texto) no header,
+// filtra textos de status, e escolhe o que provavelmente é o nome.
+function extractContactNameFromHeader() {
+  const headerEl = queryFirst(SEL.header);
+  if (!headerEl) return { name: '', source: 'no-header' };
+
+  // 1) Coleta TODOS os candidatos: spans/divs com title OU com texto curto
+  const candidates = [];
+  const seenTexts = new Set();
+
+  // Estratégia 1: elementos com [title]
+  headerEl.querySelectorAll('span[title], div[title]').forEach(el => {
+    const title = (el.getAttribute('title') || '').trim();
+    const text = (el.textContent || '').trim();
+    if (!title) return;
+    if (seenTexts.has(title)) return;
+    seenTexts.add(title);
+    candidates.push({
+      text: title,
+      domText: text,
+      hasTitle: true,
+      tag: el.tagName,
+      cls: el.className || '',
+      el,
+    });
+  });
+
+  // Estratégia 2: SEMPRE roda também — pega spans-folha com texto.
+  // O nome do contato no WhatsApp atual NÃO tem [title], só textContent.
+  headerEl.querySelectorAll('span').forEach(el => {
+    const text = (el.textContent || '').trim();
+    if (!text || text.length < 2 || text.length > 80) return;
+    if (seenTexts.has(text)) return;
+    // Ignora spans com filhos (queremos folhas — onde o texto realmente está)
+    if (el.children.length > 0) return;
+    seenTexts.add(text);
+    candidates.push({
+      text,
+      domText: text,
+      hasTitle: false,
+      tag: el.tagName,
+      cls: el.className || '',
+      el,
+    });
+  });
+
+  // 2) Filtra: descarta status, telefone vazio, datas, etc.
+  const filtered = candidates.filter(c => {
+    if (isStatusText(c.text)) return false;
+    // Descarta strings que parecem horários (ex: "07:59")
+    if (/^\d{1,2}:\d{2}$/.test(c.text)) return false;
+    // Descarta strings curtas demais
+    if (c.text.length < 2) return false;
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    return { name: '', source: 'no-candidate', candidates };
+  }
+
+  // 3) Heurística de escolha: prefere o PRIMEIRO candidato (header costuma
+  // ter nome antes do status). Se o texto parece um número de telefone,
+  // ainda assim retorna — pode ser contato sem nome salvo.
+  const chosen = filtered[0];
+  return {
+    name: chosen.text,
+    source: chosen.hasTitle ? 'header-title' : 'header-text',
+    candidates,
+  };
+}
+
 function extractContactInfo() {
   // Pede dados frescos ao inject.js (Store)
   requestStoreData();
@@ -593,25 +934,43 @@ function extractContactInfo() {
   const nameEl = queryFirst(SEL.contactTitle);
   const subEl  = queryFirst(SEL.contactSub);
 
-  // Nome: pega do DOM e filtra textos de status
-  const rawDomName = nameEl?.getAttribute('title') || nameEl?.textContent?.trim() || '';
-  const domName = isStatusText(rawDomName) ? '' : rawDomName;
+  // Telemetry: se o Store não retornou nada mas o DOM achou algo, registrar fallback
+  const storeHasPhone = !!storeData.phone;
+  const storeHasName = !!(storeData.name || storeData.pushname);
+
+  // Estratégia 1: painel "Dados do contato" (drawer) — seletores mais estáveis
+  const drawerData = extractFromContactDrawer();
+
+  // Estratégia 2: header — extração robusta via candidatos
+  const headerExtract = extractContactNameFromHeader();
+
+  // Nome: drawer > header
+  const domName = drawerData.name || headerExtract.name;
 
   // Store > DOM (filtrado)
   const storeName = storeData.name || storeData.pushname || '';
   const name = (isStatusText(storeName) ? '' : storeName) || domName;
 
-  // Telefone: Store > DOM data-id > subtítulo
+  // Telefone: Store > drawer > DOM data-id > subtítulo
   let phone = storeData.phone || '';
+  let phoneSource = storeHasPhone ? 'store' : '';
+
+  // Estratégia drawer — painel "Dados do contato" abre com o telefone visível
+  if (!phone && drawerData.phone) {
+    phone = drawerData.phone;
+    phoneSource = 'drawer';
+  }
 
   if (!phone) {
     phone = extractPhoneFromDOM();
+    if (phone) phoneSource = 'dom-dataid';
   }
 
   if (!phone) {
     const sub = subEl?.getAttribute('title') || subEl?.textContent?.trim() || '';
     const phoneRaw = sub.match(/[\+\d][\d\s\-().]{7,}/)?.[0] || '';
     phone = phoneRaw.replace(/\D/g, '');
+    if (phone) phoneSource = 'dom-subtitle';
   }
 
   // Se o telefone ainda não foi encontrado mas o nome parece um número
@@ -620,6 +979,85 @@ function extractContactInfo() {
     const digitsFromName = name.replace(/\D/g, '');
     if (digitsFromName.length >= 8) {
       phone = digitsFromName;
+      phoneSource = 'name-digits';
+    }
+  }
+
+  // Reporta fallback quando Store estava pronto mas não retornou dados
+  if (isConversationOpen()) {
+    if (storeStatus === 'found' && !storeHasPhone && phone) {
+      reportTelemetry('selector_fallback', 'contact_phone_via_' + phoneSource, {
+        storeReady: true,
+        storeHasName,
+      });
+    }
+    if (storeStatus === 'found' && !storeHasName && name) {
+      reportTelemetry('selector_fallback', 'contact_name_via_dom', {
+        storeReady: true,
+        domHadTitle: !!nameEl?.getAttribute('title'),
+      });
+    }
+    if (!phone && !name) {
+      // Dump dados ricos para identificar qual seletor novo usar
+      const headerCandidates = (headerExtract.candidates || []).slice(0, 8).map(c => ({
+        text: c.text.substring(0, 60),
+        domText: c.domText.substring(0, 60),
+        hasTitle: c.hasTitle,
+        tag: c.tag,
+        cls: (c.cls || '').substring(0, 80),
+      }));
+      const nameInfo = nameEl ? {
+        tag: nameEl.tagName,
+        cls: nameEl.className?.substring?.(0, 80) || '',
+        hasTitle: !!nameEl.getAttribute('title'),
+        title: (nameEl.getAttribute('title') || '').substring(0, 60),
+        text: (nameEl.textContent || '').substring(0, 60),
+        parentCls: nameEl.parentElement?.className?.substring?.(0, 80) || '',
+      } : null;
+      const subInfo = subEl ? {
+        tag: subEl.tagName,
+        cls: subEl.className?.substring?.(0, 80) || '',
+        hasTitle: !!subEl.getAttribute('title'),
+        title: (subEl.getAttribute('title') || '').substring(0, 60),
+        text: (subEl.textContent || '').substring(0, 60),
+      } : null;
+      const headerEl = queryFirst(SEL.header);
+      const headerInfo = headerEl ? {
+        tag: headerEl.tagName,
+        cls: headerEl.className?.substring?.(0, 80) || '',
+        spanCount: headerEl.querySelectorAll('span').length,
+        spansWithTitle: Array.from(headerEl.querySelectorAll('span[title]'))
+          .slice(0, 5)
+          .map(s => ({
+            title: (s.getAttribute('title') || '').substring(0, 40),
+            text: (s.textContent || '').substring(0, 40),
+            cls: (s.className || '').substring(0, 60),
+          })),
+      } : null;
+
+      // Dump dos data-testid disponíveis na página (descobrir nomes vivos)
+      const liveTestIds = Array.from(
+        new Set(
+          Array.from(document.querySelectorAll('[data-testid]'))
+            .slice(0, 200)
+            .map(el => el.getAttribute('data-testid'))
+            .filter(id => id && id.length < 60)
+        )
+      ).slice(0, 40);
+
+      reportTelemetry('extraction_failed', 'contact_info', {
+        storeStatus,
+        nameElFound: !!nameEl,
+        subElFound: !!subEl,
+        drawerName: drawerData.name,
+        drawerPhone: drawerData.phone,
+        headerExtractSource: headerExtract.source,
+        headerCandidates,
+        liveTestIds,
+        nameInfo,
+        subInfo,
+        headerInfo,
+      });
     }
   }
 
@@ -658,7 +1096,38 @@ function extractTextFromMsgEl(el) {
   return null;
 }
 
-function extractConversation() {
+// ─── Conversa via Store (primário) ────────────────────────────
+// Tenta primeiro o Store via inject.js; cai pro DOM se falhar.
+async function extractConversation() {
+  // 1) Store-first — imune a mudanças no HTML
+  if (storeStatus === 'found') {
+    try {
+      const storeResult = await requestStoreMessages(100);
+      if (storeResult?.messages?.length > 0) {
+        console.log(`[WZ-SF] Conversa: ${storeResult.messages.length} msgs via Store ✅`);
+        reportTelemetry('strategy_used', 'conversation_store', {
+          count: storeResult.messages.length,
+        });
+        // Limpa _diag (não foi DOM)
+        extractConversation._diag = { source: 'store', count: storeResult.messages.length };
+        return storeResult.messages.map(m => ({ text: m.text, direction: m.direction }));
+      }
+      // Store respondeu mas vazio — reporta e cai pro DOM
+      reportTelemetry('selector_fallback', 'conversation_store_empty', {
+        source: storeResult?.source || 'unknown',
+      });
+    } catch (e) {
+      reportTelemetry('selector_fallback', 'conversation_store_error', {
+        error: e.message?.substring(0, 100),
+      });
+    }
+  }
+
+  // 2) Fallback DOM (estratégias 1-6)
+  return extractConversationFromDOM();
+}
+
+function extractConversationFromDOM() {
   const msgs = [];
   const seen = new Set();
   const mainEl = getConversationContainer();
@@ -720,6 +1189,7 @@ function extractConversation() {
 
   // Salva diag para ser incluído no payload
   extractConversation._diag = diag;
+  extractConversationFromDOM._diag = diag;
   console.log('[WZ-SF] DOM Diagnóstico:', JSON.stringify(diag, null, 2));
 
   function pushMsg(text, direction) {
@@ -740,6 +1210,7 @@ function extractConversation() {
     });
     if (msgs.length > 0) {
       console.log(`[WZ-SF] Conversa: ${msgs.length} msgs via data-pre-plain-text ✅`);
+      reportTelemetry('strategy_used', 'conversation_data-pre-plain-text', { count: msgs.length });
       return msgs;
     }
   }
@@ -755,6 +1226,7 @@ function extractConversation() {
     });
     if (msgs.length > 0) {
       console.log(`[WZ-SF] Conversa: ${msgs.length} msgs via data-id ✅`);
+      reportTelemetry('strategy_used', 'conversation_data-id', { count: msgs.length });
       return msgs;
     }
   }
@@ -769,6 +1241,7 @@ function extractConversation() {
     });
   if (msgs.length > 0) {
     console.log(`[WZ-SF] Conversa: ${msgs.length} msgs via data-testid ✅`);
+    reportTelemetry('selector_fallback', 'conversation_data-testid', { count: msgs.length });
     return msgs;
   }
 
@@ -782,6 +1255,7 @@ function extractConversation() {
     });
   if (msgs.length > 0) {
     console.log(`[WZ-SF] Conversa: ${msgs.length} msgs via class ✅`);
+    reportTelemetry('selector_fallback', 'conversation_class-message-in-out', { count: msgs.length });
     return msgs;
   }
 
@@ -796,6 +1270,7 @@ function extractConversation() {
     });
   if (msgs.length > 0) {
     console.log(`[WZ-SF] Conversa: ${msgs.length} msgs via span direto ✅`);
+    reportTelemetry('selector_fallback', 'conversation_span-selectable', { count: msgs.length });
     return msgs;
   }
 
@@ -806,6 +1281,14 @@ function extractConversation() {
     const dir = detectDirection(el, mainEl);
     pushMsg(text, dir);
   });
+
+  if (msgs.length > 0) {
+    reportTelemetry('selector_fallback', 'conversation_role-row', { count: msgs.length });
+  } else {
+    reportTelemetry('extraction_failed', 'conversation_all_strategies', {
+      diag: extractConversation._diag,
+    });
+  }
 
   console.log(`[WZ-SF] Conversa: ${msgs.length} msgs (todas as estratégias esgotadas)`);
   return msgs;
@@ -878,10 +1361,48 @@ function updatePanel() {
     lastLookupPhone = null;
     updateLeadBadge();
     updateFabLeadStatus();
+    // Limpa cache de tentativas — evita crescimento infinito.
+    // Quando muda de conversa, mantém só as últimas 20 tentativas.
+    if (drawerAttempted.size > 20) {
+      drawerAttempted.clear();
+    }
     console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${contact.phone}`);
   }
 
-  // Se não há telefone, garante que badge fique vazio (sem dados do contato anterior)
+  // Se não há telefone mas temos nome, tenta abrir o drawer (uma vez) para capturar.
+  // Cacheamos por nome para não ficar abrindo/fechando.
+  // PROTEÇÕES anti-loop:
+  //   1) NÃO faz em grupos (isGroupChat)
+  //   2) Marca tentativas falhas para não retentar (cache negativo)
+  //   3) Limite global de 1 tentativa por conversationKey
+  if (!contact.phone && contact.name && !isGroupChat() && !isLikelyGroup(contact)) {
+    const cached = getDrawerCachedPhone(contact.name);
+    if (cached) {
+      contact.phone = cached;
+      panel.querySelector('.wzsf-contact-phone').textContent = `+${contact.phone}`;
+      console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${contact.phone} (cache drawer)`);
+    } else if (!drawerOpenInProgress && !drawerAttempted.has(conversationKey)) {
+      // Marca ANTES de chamar — se falhar, não tenta de novo nesta conversa
+      drawerAttempted.add(conversationKey);
+      // Abre o drawer programaticamente em background
+      openDrawerToReadPhone(contact.name).then(phone => {
+        if (!phone) return;
+        setDrawerCachedPhone(contact.name, phone);
+        // Re-renderiza painel se o contato ainda for o mesmo
+        const stillSameContact = lastConversationKey?.startsWith(contact.name);
+        if (stillSameContact) {
+          const phoneEl = panel.querySelector('.wzsf-contact-phone');
+          if (phoneEl) phoneEl.textContent = `+${phone}`;
+          console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${phone} (auto-drawer)`);
+          if (sfAuthenticated && phone !== lastLookupPhone && !lookupInProgress) {
+            lookupLeadByPhone(phone, true);
+          }
+        }
+      });
+    }
+  }
+
+  // Se ainda não há telefone, garante que badge fique vazio
   if (!contact.phone) {
     if (currentLeadInfo !== null) {
       currentLeadInfo = null;
@@ -1034,9 +1555,11 @@ function createPanel() {
 
   // ─── Botões de ação ────────────────────────────────────────
   panel.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const contact = extractContactInfo();
-      const conversation = extractConversation();
+      // Para "open" e "lead", não precisa da conversa — evita request desnecessário
+      const needsConversation = btn.dataset.action === 'conversation';
+      const conversation = needsConversation ? await extractConversation() : [];
       handleAction(btn.dataset.action, contact, conversation, panel);
     });
   });

@@ -18,6 +18,7 @@ const API_CONFIG = {
     healthCheck:          '/api/health',
     logs:                 '/api/logs',
     authCheck:            '/api/auth/check',
+    telemetry:            '/api/telemetry',
   },
 
   url(endpoint) {
