@@ -5,7 +5,7 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.3.1';
+const VERSION  = 'v2.3.2';
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -1875,6 +1875,10 @@ function showDisqualifyModal(hasLead, hasOpportunity) {
     let currentType = hasLead ? 'Lead' : 'Opportunity';
     let picklistValues = [];
     let selectedMotivo = '';
+    // Cache por objectType — evita refetch ao alternar abas
+    const picklistByType = { Lead: null, Opportunity: null };
+    // Token de geração — protege contra race conditions ao alternar abas rapidamente
+    let loadToken = 0;
 
     const modal = document.createElement('div');
     modal.id = DISQUALIFY_MODAL_ID;
@@ -2038,22 +2042,40 @@ function showDisqualifyModal(hasLead, hasOpportunity) {
 
     bindEvents();
 
-    // Carrega picklist via background
+    // Carrega picklist via background — específico do objectType atual
     const loadPicklist = async () => {
+      const myToken = ++loadToken;
+      const typeAtRequest = currentType;
+
+      // Usa cache se já carregou esse tipo nesta sessão do modal
+      if (picklistByType[typeAtRequest]) {
+        if (myToken !== loadToken || typeAtRequest !== currentType) return;
+        picklistValues = picklistByType[typeAtRequest];
+        renderModal(false);
+        bindEvents();
+        return;
+      }
+
       try {
         const resp = await sendMessage({
           action: 'getDisqualifyPicklist',
-          data: { objectType: currentType },
+          data: { objectType: typeAtRequest },
         });
+
+        // Resposta tardia — outro tab foi clicado nesse meio tempo
+        if (myToken !== loadToken || typeAtRequest !== currentType) return;
+
         if (resp?.ok && resp?.values?.length > 0) {
+          picklistByType[typeAtRequest] = resp.values;
           picklistValues = resp.values;
           renderModal(false);
         } else {
           picklistValues = [];
-          const errMsg = resp?.error || `Nenhum motivo encontrado para ${currentType}`;
+          const errMsg = resp?.error || `Nenhum motivo encontrado para ${typeAtRequest}`;
           renderModal(false, errMsg);
         }
       } catch (e) {
+        if (myToken !== loadToken) return;
         picklistValues = [];
         renderModal(false, e.message);
       }
