@@ -5,7 +5,7 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.3.0';
+const VERSION  = 'v2.3.1';
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -333,15 +333,30 @@ async function lookupLeadByPhone(phone) {
   
   try {
     const result = await sendMessage({ action: 'lookupLead', data: { phone } });
-    // wz-api retorna { ok, found, count, leads: [...] }
+    // wz-api retorna { ok, found, count, leads: [...], opportunities: [...] }
     const found = result?.ok && result?.found;
     const leadData = found && result.leads?.length > 0 ? result.leads[0] : null;
-    if (found && leadData) {
+    const oppData  = found && result.opportunities?.length > 0 ? result.opportunities[0] : null;
+
+    if (leadData) {
       currentLeadInfo = leadData;
-      console.log(`[WZ-SF ${VERSION}] 🔗 Lead encontrado: ${currentLeadInfo.leadName} (${currentLeadInfo.leadId}) | Owner: ${currentLeadInfo.ownerName} | Encerrado: ${currentLeadInfo.encerrado}`);
+      console.log(`[WZ-SF ${VERSION}] 🔗 Lead ATIVO: ${currentLeadInfo.leadName} (${currentLeadInfo.leadId}) | Owner: ${currentLeadInfo.ownerName}`);
+    } else if (oppData) {
+      // Apenas Oportunidade ativa (sem Lead ativo) — cria um shim sem leadId
+      currentLeadInfo = {
+        leadId:      null,
+        leadName:    oppData.oppName || 'Oportunidade ativa',
+        leadStatus:  oppData.stageName || '',
+        ownerId:     oppData.ownerId,
+        ownerName:   oppData.ownerName,
+        leadUrl:     oppData.oppUrl,
+        encerrado:   false,
+        opportunity: oppData,
+      };
+      console.log(`[WZ-SF ${VERSION}] 💼 Oportunidade ATIVA: ${oppData.oppName} (${oppData.oppId})`);
     } else {
       currentLeadInfo = null;
-      console.log(`[WZ-SF ${VERSION}] ❌ Nenhum Lead para ${phone}`, result?.error || '');
+      console.log(`[WZ-SF ${VERSION}] ❌ Nenhum Lead/Oportunidade ATIVO para ${phone}`, result?.error || '');
     }
   } catch (e) {
     currentLeadInfo = null;
@@ -392,11 +407,13 @@ function updateLeadBadge() {
     const encerrado = currentLeadInfo.encerrado || false;
     const opp = currentLeadInfo.opportunity;
 
-    // Determina o dot de status do lead
+    // Determina o dot de status do lead/oportunidade
+    const hasLead = !!currentLeadInfo.leadId;
     let dotClass, leadLabel;
-    if (encerrado) {
-      dotClass  = 'wzsf-dot-closed';
-      leadLabel = '🔒 Lead Encerrado';
+    if (!hasLead) {
+      // Só oportunidade ativa (sem lead)
+      dotClass  = 'wzsf-dot-online';
+      leadLabel = '💼 Oportunidade Ativa';
     } else if (!isMyLead) {
       dotClass  = 'wzsf-dot-other';
       leadLabel = '⚠️ Em atendimento';
@@ -460,21 +477,21 @@ function updateLeadBadge() {
     // Bloqueia/desbloqueia botões de ação
     const actionsEl = panel.querySelector('.wzsf-actions');
     if (actionsEl) {
-      // "Salvar Lead" bloqueado se já existe lead ativo (qualquer dono)
+      // "Salvar Lead" bloqueado SÓ se existir Lead ATIVO (não basta Opp).
+      // Como a API só retorna ativos, basta checar se leadId existe.
       const leadBtn = actionsEl.querySelector('[data-action="lead"]');
       if (leadBtn) {
-        const hasActiveLead = !encerrado; // lead existe e não está encerrado
+        const hasActiveLead = !!currentLeadInfo.leadId;
         leadBtn.disabled = hasActiveLead;
         leadBtn.title = hasActiveLead ? 'Já existe lead ativo para este contato' : '';
         leadBtn.classList.toggle('wzsf-btn-blocked', hasActiveLead);
       }
-      // Demais ações bloqueadas se não é meu lead ou está encerrado
-      const blocked = !isMyLead || encerrado;
+      // Demais ações: bloqueadas se há lead de OUTRO vendedor
+      // (Opp sem lead → não bloqueia, deixa registrar contato/atividade)
+      const blocked = !!currentLeadInfo.leadId && !isMyLead;
       actionsEl.querySelectorAll('[data-action="conversation"], [data-action="activity"], [data-action="open"]').forEach(btn => {
         btn.disabled = blocked;
-        btn.title = encerrado
-          ? 'Lead encerrado — ações bloqueadas'
-          : (!isMyLead ? `Em atendimento por ${currentLeadInfo.ownerName}` : '');
+        btn.title = blocked ? `Em atendimento por ${currentLeadInfo.ownerName}` : '';
         btn.classList.toggle('wzsf-btn-blocked', blocked);
       });
     }
@@ -1064,6 +1081,16 @@ function extractContactInfo() {
     }
   }
 
+  // Fallback final: cache do auto-drawer
+  // (foi populado por chamada anterior do openDrawerToReadPhone)
+  if (!phone && name) {
+    const cached = getDrawerCachedPhone(name);
+    if (cached) {
+      phone = cached;
+      phoneSource = 'drawer-cache';
+    }
+  }
+
   return { name, phone };
 }
 
@@ -1494,7 +1521,7 @@ function createPanel() {
             <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
             Abrir no Salesforce
           </button>
-          <button class="wzsf-btn-danger wzsf-hidden" data-action="disqualify" id="wzsf-btn-disqualify">
+          <button class="wzsf-btn-danger" data-action="disqualify" id="wzsf-btn-disqualify" disabled>
             <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>
             Desqualificar
           </button>
@@ -1766,35 +1793,17 @@ function disableButtons(panel, disable) {
   panel.querySelectorAll('[data-action]').forEach(b => b.disabled = disable);
 }
 
-// ─── Mostrar/ocultar botão Desqualificar conforme lead ────────
-// Aparece quando:
-//   • Há um Lead ativo (não encerrado, sem motivo de perda)
-//   • OU há uma Oportunidade aberta (não encerrada, não faturada)
+// ─── Habilita/desabilita botão Desqualificar ─────────────────
+// Sempre visível, mas só fica habilitado quando há Lead OU Oportunidade ATIVOS.
+// "Ativos" aqui = a API já retornou apenas registros ativos (filtro server-side).
 function updateDisqualifyButton() {
   const btn = document.querySelector('#wzsf-btn-disqualify');
   if (!btn) return;
 
-  // Lead ativo: existe, não convertido com motivo de perda, não encerrado
-  const hasActiveLead = !!(
-    currentLeadInfo?.leadId &&
-    !currentLeadInfo.motivoPerda &&
-    !currentLeadInfo.isConverted
-  );
+  const hasActiveLead = !!currentLeadInfo?.leadId;
+  const hasActiveOpp  = !!currentLeadInfo?.opportunity?.oppId;
 
-  // Oportunidade aberta: existe e não está encerrada/faturada
-  const opp = currentLeadInfo?.opportunity;
-  const hasOpenOpp = !!(
-    opp?.oppId &&
-    !opp.motivoPerda &&
-    !opp.cotacaoFaturada &&
-    opp.stageName !== 'Negociação perdida'
-  );
-
-  if (hasActiveLead || hasOpenOpp) {
-    btn.classList.remove('wzsf-hidden');
-  } else {
-    btn.classList.add('wzsf-hidden');
-  }
+  btn.disabled = !(hasActiveLead || hasActiveOpp);
 }
 
 // ─── Modal de desqualificação ─────────────────────────────────
@@ -1804,8 +1813,8 @@ async function handleDisqualify(panel) {
   const status = panel.querySelector('.wzsf-status');
 
   // Determina o que está disponível
-  const hasLead = !!(currentLeadInfo?.leadId && !currentLeadInfo.motivoPerda && !currentLeadInfo.isConverted);
-  const hasOpportunity = !!(currentLeadInfo?.opportunity?.oppId && !currentLeadInfo.opportunity?.motivoPerda && !currentLeadInfo.opportunity?.cotacaoFaturada);
+  const hasLead = !!currentLeadInfo?.leadId;
+  const hasOpportunity = !!currentLeadInfo?.opportunity?.oppId;
 
   if (!hasLead && !hasOpportunity) {
     setStatus(status, 'error', '❌ Nenhum Lead ou Oportunidade encontrado para desqualificar.');
