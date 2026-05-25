@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WhatsApp → Salesforce | Grupo Cometa",
-  "version": "2.3.2",
+  "version": "2.4.0",
   "description": "Captura dados do WhatsApp Web e envia ao Salesforce via wz-api",
   "permissions": ["activeTab", "storage", "identity", "tabs"],
   "host_permissions": [

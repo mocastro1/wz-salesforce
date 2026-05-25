@@ -5,7 +5,7 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.3.2';
+const VERSION  = 'v2.4.0';
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -1812,7 +1812,8 @@ const DISQUALIFY_MODAL_ID = 'wzsf-disqualify-modal';
 async function handleDisqualify(panel) {
   const status = panel.querySelector('.wzsf-status');
 
-  // Determina o que está disponível
+  // Decide O QUE vai ser desqualificado.
+  // Regra: Opp tem prioridade — se há Opp ativa, desqualifica ela (mesmo com Lead).
   const hasLead = !!currentLeadInfo?.leadId;
   const hasOpportunity = !!currentLeadInfo?.opportunity?.oppId;
 
@@ -1822,21 +1823,15 @@ async function handleDisqualify(panel) {
     return;
   }
 
-  const result = await showDisqualifyModal(hasLead, hasOpportunity);
+  const objectType = hasOpportunity ? 'Opportunity' : 'Lead';
+  const recordId   = hasOpportunity
+    ? currentLeadInfo.opportunity.oppId
+    : currentLeadInfo.leadId;
+
+  // Modal carrega picklist APENAS do objeto correto, sem aba
+  const result = await showDisqualifyModal(objectType);
   if (!result) return; // cancelado
-
-  const { objectType, motivoDePerda } = result;
-
-  // Determina o recordId com base no tipo escolhido
-  const recordId = objectType === 'Lead'
-    ? currentLeadInfo?.leadId
-    : currentLeadInfo?.opportunity?.oppId;
-
-  if (!recordId) {
-    setStatus(status, 'error', `❌ ID do ${objectType} não encontrado.`);
-    setTimeout(() => clearStatus(status), 4000);
-    return;
-  }
+  const motivoDePerda = result.motivoDePerda;
 
   disableButtons(panel, true);
   setStatus(status, 'loading', `⏳ Desqualificando ${objectType}...`);
@@ -1866,41 +1861,31 @@ async function handleDisqualify(panel) {
   }
 }
 
-// Modal de seleção de tipo + motivo de perda
-function showDisqualifyModal(hasLead, hasOpportunity) {
+// Modal de motivo de perda — carrega picklist APENAS do objectType passado
+function showDisqualifyModal(objectType) {
   return new Promise(async resolve => {
     document.getElementById(DISQUALIFY_MODAL_ID)?.remove();
 
-    // Tipo padrão: Lead se disponível, senão Opportunity
-    let currentType = hasLead ? 'Lead' : 'Opportunity';
     let picklistValues = [];
     let selectedMotivo = '';
-    // Cache por objectType — evita refetch ao alternar abas
-    const picklistByType = { Lead: null, Opportunity: null };
-    // Token de geração — protege contra race conditions ao alternar abas rapidamente
-    let loadToken = 0;
+
+    const titleMap = {
+      Lead:        { icon: '👤', label: 'Desqualificar Lead',        subtitle: 'Status → "Não qualificado"' },
+      Opportunity: { icon: '💼', label: 'Desqualificar Oportunidade', subtitle: 'Etapa → "Negociação perdida"' },
+    };
+    const ui = titleMap[objectType] || titleMap.Lead;
 
     const modal = document.createElement('div');
     modal.id = DISQUALIFY_MODAL_ID;
 
     const renderModal = (loading = true, errorMsg = '') => {
-      const leadTabActive  = currentType === 'Lead' ? 'active' : '';
-      const oppTabActive   = currentType === 'Opportunity' ? 'active' : '';
-      const leadTabDisabled  = !hasLead ? 'disabled style="opacity:.4;pointer-events:none;"' : '';
-      const oppTabDisabled   = !hasOpportunity ? 'disabled style="opacity:.4;pointer-events:none;"' : '';
-
-      const subtitleMap = {
-        Lead: 'Status → "Não qualificado"',
-        Opportunity: 'Etapa → "Negociação perdida"',
-      };
-
       let bodyHtml = '';
       if (loading) {
         bodyHtml = `<div class="wzsf-disqualify-loading">⏳ Carregando motivos...</div>`;
       } else if (errorMsg) {
         bodyHtml = `<div class="wzsf-disqualify-error">⚠️ ${escHtml(errorMsg)}</div>`;
       } else if (picklistValues.length === 0) {
-        bodyHtml = `<div class="wzsf-disqualify-error">Nenhum motivo cadastrado no Salesforce para ${currentType}.</div>`;
+        bodyHtml = `<div class="wzsf-disqualify-error">Nenhum motivo cadastrado em ${objectType}.</div>`;
       } else {
         bodyHtml = `
           <label class="wzsf-label">
@@ -1923,18 +1908,9 @@ function showDisqualifyModal(hasLead, hasOpportunity) {
           <div class="wzsf-disqualify-box">
             <div class="wzsf-disqualify-title">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-              Desqualificar
+              ${ui.icon} ${ui.label}
             </div>
-            <div class="wzsf-disqualify-subtitle">${subtitleMap[currentType]}</div>
-
-            <div class="wzsf-type-toggle">
-              <button class="wzsf-type-btn ${leadTabActive}" id="wzsf-dq-tab-lead" ${leadTabDisabled}>
-                👤 Lead
-              </button>
-              <button class="wzsf-type-btn ${oppTabActive}" id="wzsf-dq-tab-opp" ${oppTabDisabled}>
-                💼 Oportunidade
-              </button>
-            </div>
+            <div class="wzsf-disqualify-subtitle">${ui.subtitle}</div>
 
             ${bodyHtml}
 
@@ -1949,52 +1925,22 @@ function showDisqualifyModal(hasLead, hasOpportunity) {
       `;
     };
 
-    // Render inicial (loading)
     renderModal(true);
     document.body.appendChild(modal);
 
-    // Função para vincular eventos (chamada após cada re-render)
     const bindEvents = () => {
-      // Fecha ao clicar no overlay
       modal.querySelector('#wzsf-dq-overlay')?.addEventListener('click', (e) => {
         if (e.target === e.currentTarget) { modal.remove(); resolve(null); }
       });
-
-      // Botão cancelar
       modal.querySelector('#wzsf-dq-cancel')?.addEventListener('click', () => {
         modal.remove(); resolve(null);
       });
-
-      // Botão confirmar
       modal.querySelector('#wzsf-dq-confirm')?.addEventListener('click', () => {
-        if (!selectedMotivo) {
-          modal.querySelector('#wzsf-dq-trigger')?.focus();
-          return;
-        }
+        if (!selectedMotivo) { modal.querySelector('#wzsf-dq-trigger')?.focus(); return; }
         modal.remove();
-        resolve({ objectType: currentType, motivoDePerda: selectedMotivo });
+        resolve({ motivoDePerda: selectedMotivo });
       });
 
-      // Tabs Lead / Oportunidade
-      modal.querySelector('#wzsf-dq-tab-lead')?.addEventListener('click', async () => {
-        if (currentType === 'Lead') return;
-        currentType = 'Lead';
-        selectedMotivo = '';
-        renderModal(true);
-        bindEvents();
-        await loadPicklist();
-      });
-
-      modal.querySelector('#wzsf-dq-tab-opp')?.addEventListener('click', async () => {
-        if (currentType === 'Opportunity') return;
-        currentType = 'Opportunity';
-        selectedMotivo = '';
-        renderModal(true);
-        bindEvents();
-        await loadPicklist();
-      });
-
-      // Custom select dropdown
       const dqSelect = modal.querySelector('#wzsf-dq-select');
       if (dqSelect) {
         const trigger  = dqSelect.querySelector('#wzsf-dq-trigger');
@@ -2002,16 +1948,11 @@ function showDisqualifyModal(hasLead, hasOpportunity) {
         const dropdown = dqSelect.querySelector('#wzsf-dq-dropdown');
         const options  = dropdown?.querySelectorAll('.wzsf-custom-select__option') || [];
 
-        const openSelect = () => dqSelect.classList.add('wzsf-custom-select--open');
         const closeSelect = () => dqSelect.classList.remove('wzsf-custom-select--open');
 
         trigger?.addEventListener('click', (e) => {
           e.stopPropagation();
           dqSelect.classList.toggle('wzsf-custom-select--open');
-        });
-        dqSelect?.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') openSelect();
-          if (e.key === 'Escape') closeSelect();
         });
         document.addEventListener('click', closeSelect, { once: true });
 
@@ -2022,69 +1963,32 @@ function showDisqualifyModal(hasLead, hasOpportunity) {
             options.forEach(o => o.classList.remove('wzsf-custom-select__option--selected'));
             if (selectedMotivo) opt.classList.add('wzsf-custom-select__option--selected');
             closeSelect();
-
-            // Habilita o confirmar
             const confirmBtn = modal.querySelector('#wzsf-dq-confirm');
             if (confirmBtn) confirmBtn.disabled = !selectedMotivo;
           });
         });
-
-        // Restaura seleção anterior se re-renderizou com mesma lista
-        if (selectedMotivo && labelEl) {
-          const found = [...options].find(o => o.dataset.value === selectedMotivo);
-          if (found) {
-            labelEl.textContent = found.textContent.trim();
-            found.classList.add('wzsf-custom-select__option--selected');
-          }
-        }
       }
     };
 
     bindEvents();
 
-    // Carrega picklist via background — específico do objectType atual
-    const loadPicklist = async () => {
-      const myToken = ++loadToken;
-      const typeAtRequest = currentType;
-
-      // Usa cache se já carregou esse tipo nesta sessão do modal
-      if (picklistByType[typeAtRequest]) {
-        if (myToken !== loadToken || typeAtRequest !== currentType) return;
-        picklistValues = picklistByType[typeAtRequest];
+    // Carrega picklist do objectType correto
+    try {
+      const resp = await sendMessage({
+        action: 'getDisqualifyPicklist',
+        data: { objectType },
+      });
+      if (resp?.ok && resp?.values?.length > 0) {
+        picklistValues = resp.values;
         renderModal(false);
-        bindEvents();
-        return;
+      } else {
+        renderModal(false, resp?.error || `Nenhum motivo encontrado para ${objectType}`);
       }
+    } catch (e) {
+      renderModal(false, e.message);
+    }
+    bindEvents();
 
-      try {
-        const resp = await sendMessage({
-          action: 'getDisqualifyPicklist',
-          data: { objectType: typeAtRequest },
-        });
-
-        // Resposta tardia — outro tab foi clicado nesse meio tempo
-        if (myToken !== loadToken || typeAtRequest !== currentType) return;
-
-        if (resp?.ok && resp?.values?.length > 0) {
-          picklistByType[typeAtRequest] = resp.values;
-          picklistValues = resp.values;
-          renderModal(false);
-        } else {
-          picklistValues = [];
-          const errMsg = resp?.error || `Nenhum motivo encontrado para ${typeAtRequest}`;
-          renderModal(false, errMsg);
-        }
-      } catch (e) {
-        if (myToken !== loadToken) return;
-        picklistValues = [];
-        renderModal(false, e.message);
-      }
-      bindEvents();
-    };
-
-    await loadPicklist();
-
-    // Fechar com Escape
     const escHandler = (e) => {
       if (e.key === 'Escape') { modal.remove(); resolve(null); document.removeEventListener('keydown', escHandler); }
     };
