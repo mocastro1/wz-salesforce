@@ -1,5 +1,5 @@
 // ============================================================
-// popup.js — Status do webhook (n8n) + Login Salesforce OAuth
+// popup.js — Status da API + Login Salesforce OAuth
 // ============================================================
 
 const VERSION = 'v2.1.0';
@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ─── Webhook status ──────────────────────────────────────────
 function checkConnection() {
-  setStatusUI('checking', 'Verificando...', 'Testando webhook n8n...');
+  setStatusUI('checking', 'Verificando...', 'Testando conexão com a API...');
 
   chrome.runtime.sendMessage({ action: 'checkConnection' }, (resp) => {
     if (chrome.runtime.lastError) {
@@ -79,9 +79,9 @@ function checkConnection() {
       return;
     }
     if (resp?.ok) {
-      setStatusUI('connected', 'n8n Online', 'Webhook respondendo');
+      setStatusUI('connected', 'API Online', 'Serviço respondendo');
     } else {
-      setStatusUI('disconnected', 'n8n Offline', resp?.error || 'Webhook não respondeu');
+      setStatusUI('disconnected', 'API Offline', resp?.error || 'Serviço não respondeu');
     }
   });
 }

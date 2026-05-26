@@ -1134,3 +1134,17 @@
   border-radius: 6px;
   margin-bottom: 12px;
 }
+
+/* ── Botão refresh no card de contato ── */
+#wzsf-refresh svg {
+  transition: transform 0.3s ease;
+}
+
+@keyframes wzsf-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.wzsf-spinning svg {
+  animation: wzsf-spin 0.8s linear infinite;
+}

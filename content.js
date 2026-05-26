@@ -1,11 +1,11 @@
 // ============================================================
-// WhatsApp → Salesforce (via n8n) | content.js
-// Captura dados do WhatsApp Web e envia ao n8n
+// WhatsApp → Salesforce | content.js
+// Captura dados do WhatsApp Web e envia ao Salesforce via wz-api
 // ============================================================
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.4.0';
+const VERSION  = 'v2.5.0';
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -165,7 +165,7 @@ async function loadSellerPhone() {
   window.postMessage({ type: 'WZSF_REQUEST_SELLER' }, '*');
 }
 
-// ─── Verificar conexão com webhook (n8n) ───────────────────
+// ─── Verificar conexão com a API ───────────────────────────
 function checkWebhookConnection() {
   try {
     chrome.runtime.sendMessage({ action: 'checkConnection' }, (resp) => {
@@ -192,7 +192,7 @@ function updateConnectionBadge() {
     dot.className = `wzsf-tab-dot ${webhookOnline ? 'wzsf-dot-online' : 'wzsf-dot-offline'}`;
   }
   if (label) {
-    label.textContent = webhookOnline ? 'n8n Online' : 'n8n Offline';
+    label.textContent = webhookOnline ? 'API Online' : 'API Offline';
   }
 }
 
@@ -327,6 +327,17 @@ async function lookupLeadByPhone(phone) {
     return;
   }
 
+  // Trava forte: se já está rodando OU é o mesmo telefone, NÃO dispara de novo
+  if (lookupInProgress) {
+    console.log(`[WZ-SF ${VERSION}] ⏭️ Lookup já em andamento para ${lastLookupPhone}, ignorando ${phone}`);
+    return;
+  }
+  if (phone === lastLookupPhone && currentLeadInfo !== undefined) {
+    console.log(`[WZ-SF ${VERSION}] ⏭️ Telefone ${phone} já consultado, usando cache em memória`);
+    return;
+  }
+
+  console.log(`[WZ-SF ${VERSION}] 🔍 Iniciando lookup para ${phone}`);
   lastLookupPhone = phone; // Marca como consultado ANTES do await para evitar chamadas paralelas
   lookupInProgress = true;
   updateLeadBadge(); // Mostra "Carregando..."
@@ -364,8 +375,47 @@ async function lookupLeadByPhone(phone) {
   } finally {
     lookupInProgress = false;
     updateLeadBadge();
+    updateActionButtons(); // só atualiza botões quando lookup termina
     updateFabLeadStatus();
   }
+}
+
+// ─── Atualiza estado dos botões de ação ──────────────────────
+// Chamada SOMENTE quando o lookup termina — evita flickering.
+function updateActionButtons() {
+  const panel = document.getElementById(PANEL_ID);
+  if (!panel) return;
+  const actionsEl = panel.querySelector('.wzsf-actions');
+  if (!actionsEl) return;
+
+  if (!currentLeadInfo) {
+    // Nenhum lead/opp — habilita tudo
+    actionsEl.querySelectorAll('[data-action]').forEach(btn => {
+      btn.disabled = false;
+      btn.title = '';
+      btn.classList.remove('wzsf-btn-blocked');
+    });
+    return;
+  }
+
+  const isMyLead = !sfUserId || currentLeadInfo.ownerId === sfUserId;
+
+  // "Salvar Lead" bloqueado se já existe Lead ativo
+  const leadBtn = actionsEl.querySelector('[data-action="lead"]');
+  if (leadBtn) {
+    const hasActiveLead = !!currentLeadInfo.leadId;
+    leadBtn.disabled = hasActiveLead;
+    leadBtn.title = hasActiveLead ? 'Já existe lead ativo para este contato' : '';
+    leadBtn.classList.toggle('wzsf-btn-blocked', hasActiveLead);
+  }
+
+  // Demais ações: bloqueadas se lead é de outro vendedor
+  const blocked = !!currentLeadInfo.leadId && !isMyLead;
+  actionsEl.querySelectorAll('[data-action="conversation"], [data-action="activity"], [data-action="open"]').forEach(btn => {
+    btn.disabled = blocked;
+    btn.title = blocked ? `Em atendimento por ${currentLeadInfo.ownerName}` : '';
+    btn.classList.toggle('wzsf-btn-blocked', blocked);
+  });
 }
 
 function updateLeadBadge() {
@@ -380,7 +430,7 @@ function updateLeadBadge() {
 
   let badge = card.querySelector('.wzsf-lead-badge');
 
-  // ── Carregando ───────────────────────────────────────────────
+  // ── Carregando — desabilita todos os botões até ter resultado ─
   if (lookupInProgress) {
     if (!badge) {
       badge = document.createElement('div');
@@ -392,6 +442,14 @@ function updateLeadBadge() {
       <span class="wzsf-lead-text">Buscando Lead...</span>
     `;
     badge.style.display = 'flex';
+    // Desabilita todos os botões durante a busca — evita flickering
+    const actionsEl = panel.querySelector('.wzsf-actions');
+    if (actionsEl) {
+      actionsEl.querySelectorAll('[data-action]').forEach(btn => {
+        btn.disabled = true;
+        btn.title = 'Aguardando verificação no Salesforce...';
+      });
+    }
     return;
   }
 
@@ -474,28 +532,6 @@ function updateLeadBadge() {
       if (url) sendMessage({ action: 'openInSalesforce', leadUrl: url });
     });
 
-    // Bloqueia/desbloqueia botões de ação
-    const actionsEl = panel.querySelector('.wzsf-actions');
-    if (actionsEl) {
-      // "Salvar Lead" bloqueado SÓ se existir Lead ATIVO (não basta Opp).
-      // Como a API só retorna ativos, basta checar se leadId existe.
-      const leadBtn = actionsEl.querySelector('[data-action="lead"]');
-      if (leadBtn) {
-        const hasActiveLead = !!currentLeadInfo.leadId;
-        leadBtn.disabled = hasActiveLead;
-        leadBtn.title = hasActiveLead ? 'Já existe lead ativo para este contato' : '';
-        leadBtn.classList.toggle('wzsf-btn-blocked', hasActiveLead);
-      }
-      // Demais ações: bloqueadas se há lead de OUTRO vendedor
-      // (Opp sem lead → não bloqueia, deixa registrar contato/atividade)
-      const blocked = !!currentLeadInfo.leadId && !isMyLead;
-      actionsEl.querySelectorAll('[data-action="conversation"], [data-action="activity"], [data-action="open"]').forEach(btn => {
-        btn.disabled = blocked;
-        btn.title = blocked ? `Em atendimento por ${currentLeadInfo.ownerName}` : '';
-        btn.classList.toggle('wzsf-btn-blocked', blocked);
-      });
-    }
-
   } else {
     // Nenhum Lead encontrado
     if (!badge) {
@@ -508,17 +544,9 @@ function updateLeadBadge() {
       <span class="wzsf-lead-text">Nenhum Lead encontrado</span>
     `;
     badge.style.display = 'flex';
-
-    // Libera botões
-    const actionsEl = panel.querySelector('.wzsf-actions');
-    if (actionsEl) {
-      actionsEl.querySelectorAll('[data-action]').forEach(btn => {
-        btn.disabled = false;
-        btn.title = '';
-        btn.classList.remove('wzsf-btn-blocked');
-      });
-    }
   }
+  // Botões são gerenciados exclusivamente por updateActionButtons()
+  // para evitar flickering — não alterar disabled aqui.
 }
 
 // ─── Seletores com fallback (WhatsApp muda data-testid frequentemente) ──
@@ -1164,7 +1192,7 @@ function extractConversationFromDOM() {
   if (!mainEl) return msgs;
 
   // ── Diagnóstico — contagem de elementos por seletor ──────────
-  // Este objeto será anexado ao payload para vermos no n8n
+  // Este objeto será anexado ao payload para diagnóstico
   const diag = {
     hasMain: !!mainEl,
     mainTag: mainEl.tagName,
@@ -1353,18 +1381,28 @@ function updatePanel() {
   if (!isConversationOpen()) {
     panel.querySelector('.wzsf-contact-name').textContent = 'Aguardando...';
     panel.querySelector('.wzsf-contact-phone').textContent = 'Abra uma conversa no WhatsApp';
-    panel.querySelectorAll('[data-action]').forEach(b => b.disabled = true);
+    panel.querySelectorAll('[data-action]').forEach(b => {
+      b.disabled = true;
+      b.title = '';
+      b.classList.remove('wzsf-btn-blocked');
+    });
     lastConversationKey = null;
+    lastLookupPhone = null;
+    lookupInProgress = false;
+    currentLeadInfo = null;
     return;
   }
 
-  // Habilita botões apenas se: conversa aberta + NÃO é grupo + SF autenticado
+  // Habilita/desabilita botões por grupo ou auth — mas NÃO toca se lookup estiver rodando
+  // (updateActionButtons cuida dos botões durante e após o lookup)
   const isGroup = isGroupChat();
   const shouldDisable = isGroup || !sfAuthenticated;
-  panel.querySelectorAll('[data-action]').forEach(b => {
-    b.disabled = shouldDisable;
-    b.title = shouldDisable ? (isGroup ? 'Grupos não suportados' : 'Faça login no Salesforce') : '';
-  });
+  if (!lookupInProgress) {
+    panel.querySelectorAll('[data-action]').forEach(b => {
+      b.disabled = shouldDisable;
+      b.title = shouldDisable ? (isGroup ? 'Grupos não suportados' : 'Faça login no Salesforce') : '';
+    });
+  }
 
   if (isGroup) {
     const nameEl = queryFirst(SEL.contactTitle);
@@ -1378,8 +1416,12 @@ function updatePanel() {
   }
 
   const contact = extractContactInfo();
-  const conversationKey = contact.name + contact.phone;
+  // Chave de conversa baseada APENAS no nome — assim quando o phone aparece depois
+  // (via drawer ou atualização do WA), não disparamos um segundo lookup achando
+  // que mudou de conversa.
+  const conversationKey = contact.name || '(sem nome)';
 
+  // Detecta mudança real de conversa (nome diferente)
   if (conversationKey !== lastConversationKey) {
     lastConversationKey = conversationKey;
     panel.querySelector('.wzsf-contact-name').textContent  = contact.name  || 'Contato';
@@ -1392,11 +1434,13 @@ function updatePanel() {
     updateLeadBadge();
     updateFabLeadStatus();
     // Limpa cache de tentativas — evita crescimento infinito.
-    // Quando muda de conversa, mantém só as últimas 20 tentativas.
     if (drawerAttempted.size > 20) {
       drawerAttempted.clear();
     }
-    console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${contact.phone}`);
+    console.log(`[WZ-SF ${VERSION}] 📞 Conversa mudou para: ${contact.name} | ${contact.phone || '(sem phone ainda)'}`);
+  } else if (contact.phone && panel.querySelector('.wzsf-contact-phone').textContent !== `+${contact.phone}`) {
+    // Mesmo contato mas o phone agora apareceu (vindo do drawer ou atualização do WA)
+    panel.querySelector('.wzsf-contact-phone').textContent = `+${contact.phone}`;
   }
 
   // Se não há telefone mas temos nome, tenta abrir o drawer (uma vez) para capturar.
@@ -1419,13 +1463,14 @@ function updatePanel() {
         if (!phone) return;
         setDrawerCachedPhone(contact.name, phone);
         // Re-renderiza painel se o contato ainda for o mesmo
-        const stillSameContact = lastConversationKey?.startsWith(contact.name);
+        const stillSameContact = lastConversationKey === contact.name;
         if (stillSameContact) {
           const phoneEl = panel.querySelector('.wzsf-contact-phone');
           if (phoneEl) phoneEl.textContent = `+${phone}`;
-          console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${phone} (auto-drawer)`);
-          if (sfAuthenticated && phone !== lastLookupPhone && !lookupInProgress) {
-            lookupLeadByPhone(phone, true);
+          console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${phone} (auto-drawer) — disparando lookup`);
+          // Único ponto de disparo de lookup do drawer
+          if (sfAuthenticated) {
+            lookupLeadByPhone(phone);
           }
         }
       });
@@ -1442,11 +1487,23 @@ function updatePanel() {
     return;
   }
 
-  // Lookup controlado SOMENTE pelo telefone — o nome pode mudar sem disparar nova busca
-  if (sfAuthenticated && contact.phone !== lastLookupPhone && !lookupInProgress) {
-    currentLeadInfo = null;
-    updateLeadBadge();
-    lookupLeadByPhone(contact.phone, true);
+  // Lookup: busca sempre que muda de contato
+  // (lastLookupPhone foi resetado ao trocar de conversa — garante busca fresca sempre)
+  if (sfAuthenticated && !lookupInProgress) {
+    if (contact.phone !== lastLookupPhone) {
+      currentLeadInfo = null;
+      // Desabilita todos os botões imediatamente — sem flickering
+      const actionsEl = panel.querySelector('.wzsf-actions');
+      if (actionsEl) {
+        actionsEl.querySelectorAll('[data-action]').forEach(btn => {
+          btn.disabled = true;
+          btn.title = 'Aguardando verificação no Salesforce...';
+          btn.classList.remove('wzsf-btn-blocked');
+        });
+      }
+      updateLeadBadge();
+      lookupLeadByPhone(contact.phone);
+    }
   }
 }
 
@@ -1498,8 +1555,8 @@ function createPanel() {
             <div class="wzsf-contact-name">Contato</div>
             <div class="wzsf-contact-phone">—</div>
           </div>
-          <button class="wzsf-btn-chevron" title="Detalhes">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          <button class="wzsf-btn-chevron" id="wzsf-refresh" title="Atualizar status do Lead/Oportunidade">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
           </button>
         </div>
 
@@ -1587,6 +1644,26 @@ function createPanel() {
     });
   }
 
+  // ─── Botão Refresh — força nova busca no SF ──────────────────
+  const refreshBtn = panel.querySelector('#wzsf-refresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      if (!sfAuthenticated || lookupInProgress) return;
+      const contact = extractContactInfo();
+      if (!contact.phone) return;
+      // Força re-lookup resetando o cache do telefone
+      lastLookupPhone = null;
+      currentLeadInfo = null;
+      updateLeadBadge();
+      updateFabLeadStatus();
+      // Animação de rotação enquanto carrega
+      refreshBtn.classList.add('wzsf-spinning');
+      lookupLeadByPhone(contact.phone, true).finally(() => {
+        refreshBtn.classList.remove('wzsf-spinning');
+      });
+    });
+  }
+
   // ─── Botões de ação ────────────────────────────────────────
   panel.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1644,7 +1721,7 @@ function updateFabLeadStatus() {
   }
 }
 
-// ─── Ações — Envia ao n8n via webhooks ────────────────────────
+// ─── Ações — Envia ao Salesforce via wz-api ───────────────────
 async function handleAction(action, contact, conversation, panel) {
   const status = panel.querySelector('.wzsf-status');
 
@@ -1678,7 +1755,7 @@ async function handleAction(action, contact, conversation, panel) {
   }
 
   disableButtons(panel, true);
-  setStatus(status, 'loading', '⏳ Enviando ao n8n...');
+  setStatus(status, 'loading', '⏳ Enviando ao Salesforce...');
 
   try {
     let msgAction, msgData;
@@ -1828,8 +1905,8 @@ async function handleDisqualify(panel) {
     ? currentLeadInfo.opportunity.oppId
     : currentLeadInfo.leadId;
 
-  // Modal carrega picklist APENAS do objeto correto, sem aba
-  const result = await showDisqualifyModal(objectType);
+  // Modal carrega picklist filtrado pelo LeadSource do registro
+  const result = await showDisqualifyModal(objectType, recordId);
   if (!result) return; // cancelado
   const motivoDePerda = result.motivoDePerda;
 
@@ -1861,12 +1938,11 @@ async function handleDisqualify(panel) {
   }
 }
 
-// Modal de motivo de perda — carrega picklist APENAS do objectType passado
-function showDisqualifyModal(objectType) {
+// Modal de motivo de perda — carrega picklist filtrado pelo LeadSource do registro
+function showDisqualifyModal(objectType, recordId) {
   return new Promise(async resolve => {
     document.getElementById(DISQUALIFY_MODAL_ID)?.remove();
 
-    let picklistValues = [];
     let selectedMotivo = '';
 
     const titleMap = {
@@ -1875,19 +1951,72 @@ function showDisqualifyModal(objectType) {
     };
     const ui = titleMap[objectType] || titleMap.Lead;
 
+    // ── Estrutura fixa do modal — renderizada UMA vez ──────────
     const modal = document.createElement('div');
     modal.id = DISQUALIFY_MODAL_ID;
+    modal.innerHTML = `
+      <div class="wzsf-overlay" id="wzsf-dq-overlay">
+        <div class="wzsf-disqualify-box">
+          <div class="wzsf-disqualify-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+            ${ui.icon} ${ui.label}
+          </div>
+          <div class="wzsf-disqualify-subtitle">${ui.subtitle}</div>
 
-    const renderModal = (loading = true, errorMsg = '') => {
-      let bodyHtml = '';
-      if (loading) {
-        bodyHtml = `<div class="wzsf-disqualify-loading">⏳ Carregando motivos...</div>`;
-      } else if (errorMsg) {
-        bodyHtml = `<div class="wzsf-disqualify-error">⚠️ ${escHtml(errorMsg)}</div>`;
-      } else if (picklistValues.length === 0) {
-        bodyHtml = `<div class="wzsf-disqualify-error">Nenhum motivo cadastrado em ${objectType}.</div>`;
-      } else {
-        bodyHtml = `
+          <div id="wzsf-dq-body">
+            <div class="wzsf-disqualify-loading">⏳ Carregando motivos...</div>
+          </div>
+
+          <div class="wzsf-modal-actions">
+            <button id="wzsf-dq-cancel" class="wzsf-btn-ghost">Cancelar</button>
+            <button id="wzsf-dq-confirm" class="wzsf-btn-danger" disabled>Confirmar</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Fecha o modal e remove TODOS os listeners de document (evita vazamento)
+    const cleanup = () => {
+      document.removeEventListener('keydown', escHandler);
+      document.removeEventListener('click', outsideClickHandler);
+      modal.remove();
+    };
+    const escHandler = (e) => {
+      if (e.key === 'Escape') { cleanup(); resolve(null); }
+    };
+    // Placeholder — só é usado depois que o select é renderizado
+    let outsideClickHandler = () => {};
+
+    // ── Eventos fixos (overlay, cancel, confirm, esc) ──────────
+    modal.querySelector('#wzsf-dq-overlay').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) { cleanup(); resolve(null); }
+    });
+    modal.querySelector('#wzsf-dq-cancel').addEventListener('click', () => {
+      cleanup(); resolve(null);
+    });
+    modal.querySelector('#wzsf-dq-confirm').addEventListener('click', () => {
+      if (!selectedMotivo) return;
+      cleanup();
+      resolve({ motivoDePerda: selectedMotivo });
+    });
+    document.addEventListener('keydown', escHandler);
+
+    // ── Carrega picklist e atualiza só o body ──────────────────
+    try {
+      const resp = await sendMessage({
+        action: 'getDisqualifyPicklist',
+        data: { objectType, recordId },
+      });
+
+      const body = modal.querySelector('#wzsf-dq-body');
+      const confirmBtn = modal.querySelector('#wzsf-dq-confirm');
+
+      if (resp?.ok && resp?.values?.length > 0) {
+        const values = resp.values;
+
+        // Injeta o select no body
+        body.innerHTML = `
           <label class="wzsf-label">
             Motivo de Perda
             <div class="wzsf-custom-select" id="wzsf-dq-select" tabindex="0">
@@ -1897,102 +2026,54 @@ function showDisqualifyModal(objectType) {
               </div>
               <div class="wzsf-custom-select__dropdown" id="wzsf-dq-dropdown">
                 <div class="wzsf-custom-select__option wzsf-custom-select__option--placeholder" data-value="">-- Selecione --</div>
-                ${picklistValues.map(v => `<div class="wzsf-custom-select__option" data-value="${escHtml(v.value)}">${escHtml(v.label)}</div>`).join('')}
+                ${values.map(v => `<div class="wzsf-custom-select__option" data-value="${escHtml(v.value)}">${escHtml(v.label)}</div>`).join('')}
               </div>
             </div>
           </label>`;
-      }
 
-      modal.innerHTML = `
-        <div class="wzsf-overlay" id="wzsf-dq-overlay">
-          <div class="wzsf-disqualify-box">
-            <div class="wzsf-disqualify-title">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-              ${ui.icon} ${ui.label}
-            </div>
-            <div class="wzsf-disqualify-subtitle">${ui.subtitle}</div>
+        // Eventos do select — registrados UMA vez no body já populado
+        const dqSelect = body.querySelector('#wzsf-dq-select');
+        const trigger  = body.querySelector('#wzsf-dq-trigger');
+        const labelEl  = body.querySelector('#wzsf-dq-label');
+        const dropdown = body.querySelector('#wzsf-dq-dropdown');
+        const options  = dropdown.querySelectorAll('.wzsf-custom-select__option');
 
-            ${bodyHtml}
-
-            <div class="wzsf-modal-actions">
-              <button id="wzsf-dq-cancel" class="wzsf-btn-ghost">Cancelar</button>
-              <button id="wzsf-dq-confirm" class="wzsf-btn-danger" ${(loading || picklistValues.length === 0) ? 'disabled' : ''}>
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-    };
-
-    renderModal(true);
-    document.body.appendChild(modal);
-
-    const bindEvents = () => {
-      modal.querySelector('#wzsf-dq-overlay')?.addEventListener('click', (e) => {
-        if (e.target === e.currentTarget) { modal.remove(); resolve(null); }
-      });
-      modal.querySelector('#wzsf-dq-cancel')?.addEventListener('click', () => {
-        modal.remove(); resolve(null);
-      });
-      modal.querySelector('#wzsf-dq-confirm')?.addEventListener('click', () => {
-        if (!selectedMotivo) { modal.querySelector('#wzsf-dq-trigger')?.focus(); return; }
-        modal.remove();
-        resolve({ motivoDePerda: selectedMotivo });
-      });
-
-      const dqSelect = modal.querySelector('#wzsf-dq-select');
-      if (dqSelect) {
-        const trigger  = dqSelect.querySelector('#wzsf-dq-trigger');
-        const labelEl  = dqSelect.querySelector('#wzsf-dq-label');
-        const dropdown = dqSelect.querySelector('#wzsf-dq-dropdown');
-        const options  = dropdown?.querySelectorAll('.wzsf-custom-select__option') || [];
-
-        const closeSelect = () => dqSelect.classList.remove('wzsf-custom-select--open');
-
-        trigger?.addEventListener('click', (e) => {
+        trigger.addEventListener('click', (e) => {
           e.stopPropagation();
           dqSelect.classList.toggle('wzsf-custom-select--open');
         });
-        document.addEventListener('click', closeSelect, { once: true });
+
+        // Fecha dropdown ao clicar fora — listener removido pelo cleanup()
+        outsideClickHandler = (e) => {
+          if (!dqSelect.contains(e.target)) {
+            dqSelect.classList.remove('wzsf-custom-select--open');
+          }
+        };
+        document.addEventListener('click', outsideClickHandler);
 
         options.forEach(opt => {
-          opt.addEventListener('click', () => {
-            selectedMotivo = opt.dataset.value || '';
+          opt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const val = opt.dataset.value || '';
+            if (!val) return; // ignora placeholder
+            selectedMotivo = val;
             labelEl.textContent = opt.textContent.trim();
             options.forEach(o => o.classList.remove('wzsf-custom-select__option--selected'));
-            if (selectedMotivo) opt.classList.add('wzsf-custom-select__option--selected');
-            closeSelect();
-            const confirmBtn = modal.querySelector('#wzsf-dq-confirm');
-            if (confirmBtn) confirmBtn.disabled = !selectedMotivo;
+            opt.classList.add('wzsf-custom-select__option--selected');
+            dqSelect.classList.remove('wzsf-custom-select--open');
+            confirmBtn.disabled = false;
           });
         });
-      }
-    };
 
-    bindEvents();
-
-    // Carrega picklist do objectType correto
-    try {
-      const resp = await sendMessage({
-        action: 'getDisqualifyPicklist',
-        data: { objectType },
-      });
-      if (resp?.ok && resp?.values?.length > 0) {
-        picklistValues = resp.values;
-        renderModal(false);
       } else {
-        renderModal(false, resp?.error || `Nenhum motivo encontrado para ${objectType}`);
+        const msg = resp?.error || `Nenhum motivo encontrado para ${objectType}`;
+        body.innerHTML = `<div class="wzsf-disqualify-error">⚠️ ${escHtml(msg)}</div>`;
       }
-    } catch (e) {
-      renderModal(false, e.message);
-    }
-    bindEvents();
 
-    const escHandler = (e) => {
-      if (e.key === 'Escape') { modal.remove(); resolve(null); document.removeEventListener('keydown', escHandler); }
-    };
-    document.addEventListener('keydown', escHandler);
+    } catch (e) {
+      const body = modal.querySelector('#wzsf-dq-body');
+      body.innerHTML = `<div class="wzsf-disqualify-error">⚠️ ${escHtml(e.message)}</div>`;
+    }
   });
 }
 
@@ -2000,6 +2081,9 @@ function showDisqualifyModal(objectType) {
 function showConfirmModal(contact, action) {
   return new Promise(async resolve => {
     document.getElementById(MODAL_ID)?.remove();
+
+    // Listener para fechar dropdown ao clicar fora — guardado para cleanup
+    let outsideClickHandler = null;
 
     // Busca picklist Interesse_em__c apenas para criar lead
     let interestOptions = [];
@@ -2071,9 +2155,10 @@ function showConfirmModal(contact, action) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
         if (e.key === 'Escape') close();
       });
-      document.addEventListener('click', (e) => {
+      outsideClickHandler = (e) => {
         if (!customSelect.contains(e.target)) close();
-      }, { capture: true });
+      };
+      document.addEventListener('click', outsideClickHandler, { capture: true });
 
       options.forEach(opt => {
         opt.addEventListener('click', () => {
@@ -2088,18 +2173,27 @@ function showConfirmModal(contact, action) {
       // Expose value via getter on the container
       customSelect._getValue = () => selectedValue;
     }
+
+    // Fecha o modal removendo todos os listeners de document
+    const cleanup = () => {
+      if (outsideClickHandler) {
+        document.removeEventListener('click', outsideClickHandler, { capture: true });
+      }
+      modal.remove();
+    };
+
     modal.querySelector('#wzsf-cancel').addEventListener('click', () => {
-      modal.remove(); resolve(null);
+      cleanup(); resolve(null);
     });
     modal.querySelector('.wzsf-overlay').addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) { modal.remove(); resolve(null); }
+      if (e.target === e.currentTarget) { cleanup(); resolve(null); }
     });
     modal.querySelector('#wzsf-confirm').addEventListener('click', () => {
       const name  = modal.querySelector('#wzsf-inp-name').value.trim();
       const phone = modal.querySelector('#wzsf-inp-phone').value.trim().replace(/\D/g, '');
       const customSel = modal.querySelector('#wzsf-custom-select');
       const interesse = customSel ? (customSel._getValue?.() || '') : '';
-      modal.remove();
+      cleanup();
       resolve({ name, phone, interesse: interesse || undefined });
     });
 
@@ -2142,8 +2236,20 @@ function makeDraggable(el) {
 }
 
 // ─── MutationObserver robusto ────────────────────────────────
-// Observa apenas mudanças de filhos (não atributos) para performance
-const observer = new MutationObserver(() => {
+// Observa mudanças de filhos (não atributos) para performance.
+// IGNORA mudanças dentro do próprio painel e FAB — evita loop de re-render
+// causado pelas atualizações do badge/botões que o próprio código faz.
+const observer = new MutationObserver((mutations) => {
+  const panelEl = document.getElementById(PANEL_ID);
+  const fabEl   = document.getElementById('wzsf-fab');
+  const hasExternalChange = mutations.some((m) => {
+    const t = m.target;
+    return (
+      (!panelEl || (!panelEl.contains(t) && t !== panelEl)) &&
+      (!fabEl   || (!fabEl.contains(t)   && t !== fabEl))
+    );
+  });
+  if (!hasExternalChange) return;
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(updatePanel, 400);
 });

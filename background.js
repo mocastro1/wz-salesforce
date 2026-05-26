@@ -198,6 +198,7 @@ async function saveLead(data) {
     LastName:    data.lastName  || data.LastName  || (data.name || '').split(' ').slice(1).join(' ') || 'WhatsApp',
     Company:     data.company   || data.Company   || 'Pessoa Física',
     Phone:       data.phone     || data.Phone     || '',
+    MobilePhone: data.phone     || data.Phone     || undefined,
     Status:      'Novo',
     LeadSource:  'Redes sociais do vendedor',
     Concessionaria_Ref__c: 'BL', // TODO: usar sfUserData.concessionariaRef quando User.Apelido_Concessionaria__c tiver Account correspondente
@@ -250,9 +251,11 @@ async function disqualifyRecord(data) {
 }
 
 async function getDisqualifyPicklist(data) {
-  // Busca picklist de motivo de perda para Lead ou Opportunity
+  // Busca picklist de motivo de perda filtrado pelo LeadSource do registro
   const objectName = data?.objectType || 'Lead';
-  const path = API_CONFIG.endpoints.disqualifyPicklist + '?object=' + encodeURIComponent(objectName);
+  const recordId   = data?.recordId   || '';
+  let path = API_CONFIG.endpoints.disqualifyPicklist + '?object=' + encodeURIComponent(objectName);
+  if (recordId) path += '&recordId=' + encodeURIComponent(recordId);
   return apiFetch(path, null, 'GET');
 }
 

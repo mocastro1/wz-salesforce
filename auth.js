@@ -27,12 +27,7 @@ async function generateCodeChallenge(verifier) {
 async function oauthLogin() {
   const redirectUri = chrome.identity.getRedirectURL('salesforce');
 
-  console.group('[WZ-SF] 🔐 Iniciando OAuth Salesforce (User-Agent Flow)');
-  console.log('Client ID:', SF_CONFIG.clientId);
-  console.log('Login URL:', SF_CONFIG.loginUrl);
-  console.log('Redirect URI (EXATO):', redirectUri);
-  console.log('Scopes:', SF_CONFIG.scopes);
-  console.groupEnd();
+  console.log('[WZ-SF] 🔐 Iniciando OAuth Salesforce (User-Agent Flow)');
 
   // User-Agent Flow — token retorna direto na URL, sem trocar por código
   const authUrl = `${SF_CONFIG.loginUrl}/services/oauth2/authorize?` +
@@ -79,9 +74,8 @@ async function oauthLogin() {
 
           console.log('[WZ-SF] ✅ Access token recebido (User-Agent Flow)');
 
-          // Extrai instance_url e outros dados do hash
+          // Extrai instance_url do hash (não loga token nem URL com query)
           const sfInstanceUrl = params.get('instance_url') || '';
-          console.log('[WZ-SF] Instance URL do hash:', sfInstanceUrl);
 
           parseAndSaveToken(token, sfInstanceUrl)
             .then(resolve)
@@ -131,7 +125,7 @@ async function parseAndSaveToken(accessToken, instanceUrl) {
       const me = await resp.json();
       tokens.userId   = me.id || '';
       tokens.userName = me.name || me.displayName || '';
-      console.log('[WZ-SF] 👤 Usuário SF:', tokens.userName, '| ID:', tokens.userId);
+      console.log('[WZ-SF] 👤 Usuário SF autenticado');
     } else {
       console.warn('[WZ-SF] Chatter /me falhou:', resp.status);
     }
@@ -140,7 +134,7 @@ async function parseAndSaveToken(accessToken, instanceUrl) {
   }
 
   await saveTokens(tokens);
-  console.log('[WZ-SF] 💾 Token salvo. Instance URL:', apiUrl);
+  console.log('[WZ-SF] 💾 Token salvo');
   return tokens;
 }
 
