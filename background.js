@@ -24,6 +24,17 @@ async function getCache() {
 }
 
 async function cacheKey(action, data) {
+  // Para registerConversation, usa recordId (Task é vinculada a um registro)
+  if (action === 'registerConversation' && data.recordId) {
+    const uid = sfUserData.userId || 'anon';
+    const msgCount = Array.isArray(data.messages) ? data.messages.length : 0;
+    return `${uid}:${action}:${data.recordId}:${msgCount}`;
+  }
+  // Para createActivity (lembrete), usa recordId + data + hora
+  if (action === 'createActivity' && data.recordId) {
+    const uid = sfUserData.userId || 'anon';
+    return `${uid}:${action}:${data.recordId}:${data.reminderDate}:${data.reminderTime}`;
+  }
   const phone = data.phone || data.Phone || '';
   const name = data.name || data.Name || data.FirstName || '';
   const uid = sfUserData.userId || 'anon';
@@ -201,35 +212,36 @@ async function saveLead(data) {
     MobilePhone: data.phone     || data.Phone     || undefined,
     Status:      'Novo',
     LeadSource:  'Redes sociais do vendedor',
-    Concessionaria_Ref__c: 'BL', // TODO: usar sfUserData.concessionariaRef quando User.Apelido_Concessionaria__c tiver Account correspondente
+    // Concessionaria_Ref__c é resolvida pela API a partir do User SF logado
+    // (Apelido_Concessionaria__c). Não enviamos daqui.
     Interesse_em__c: data.interesse || data.Interesse_em__c || undefined,
     Description: data.description || undefined,
     sellerPhone: data.sellerPhone || undefined,
   };
-  console.log('[WZ-SF bg] saveLead payload:', JSON.stringify(payload));
-  console.log('[WZ-SF bg] sfUserData:', JSON.stringify(sfUserData));
   return apiFetch('saveLead', payload);
 }
 
 async function registerConversation(data) {
+  // Novo schema: cria Task vinculada a Lead ou Opportunity
   const payload = {
-    phone:       data.phone || data.Phone || '',
-    contactName: data.name  || data.contactName || 'Contato',
-    summary:     data.summary || data.description || undefined,
-    leadId:      data.leadId  || undefined,
+    recordId:         data.recordId,
+    recordType:       data.recordType, // 'Lead' | 'Opportunity'
+    participantName:  data.participantName,
+    conversationDate: data.conversationDate,
+    messages:         data.messages || [],
   };
   return apiFetch('registerConversation', payload);
 }
 
 async function createActivity(data) {
+  // Novo fluxo: cria Task de lembrete vinculada a Lead/Opp
   const payload = {
-    Subject:      data.subject || data.Subject || `WhatsApp — ${data.name || data.contactName || 'Contato'}`,
-    Description:  data.description || data.Description || undefined,
-    WhoId:        data.leadId || data.WhoId || undefined,
-    Priority:     data.priority || 'Normal',
-    Status:       'Not Started',
-    Type:         'WhatsApp',
-    ActivityDate: data.activityDate || new Date().toISOString().split('T')[0],
+    recordId:        data.recordId,
+    recordType:      data.recordType, // 'Lead' | 'Opportunity'
+    participantName: data.participantName,
+    reminderDate:    data.reminderDate,
+    reminderTime:    data.reminderTime,
+    description:     data.description || undefined,
   };
   return apiFetch('createActivity', payload);
 }

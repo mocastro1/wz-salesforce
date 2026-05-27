@@ -5,7 +5,7 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.5.0';
+const VERSION  = 'v2.6.0';
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -1168,7 +1168,17 @@ async function extractConversation() {
         });
         // Limpa _diag (não foi DOM)
         extractConversation._diag = { source: 'store', count: storeResult.messages.length };
-        return storeResult.messages.map(m => ({ text: m.text, direction: m.direction }));
+        return storeResult.messages.map(m => {
+          // timestamp ISO -> "HH:MM" (hora local do navegador)
+          let time;
+          if (m.timestamp) {
+            const d = new Date(m.timestamp);
+            if (!isNaN(d.getTime())) {
+              time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            }
+          }
+          return { text: m.text, direction: m.direction, time };
+        });
       }
       // Store respondeu mas vazio — reporta e cai pro DOM
       reportTelemetry('selector_fallback', 'conversation_store_empty', {
@@ -1350,14 +1360,6 @@ function extractConversationFromDOM() {
 
   console.log(`[WZ-SF] Conversa: ${msgs.length} msgs (todas as estratégias esgotadas)`);
   return msgs;
-}
-
-function buildConversationSummary(msgs) {
-  if (!msgs.length) return '';
-  return msgs
-    .slice(-20)
-    .map(m => `${m.direction === 'out' ? 'Vendedor' : 'Cliente'}: ${m.text}`)
-    .join('\n');
 }
 
 // ─── Painel flutuante ────────────────────────────────────────
@@ -1564,7 +1566,7 @@ function createPanel() {
         <div class="wzsf-actions">
           <button class="wzsf-btn-primary" data-action="lead">
             <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
-            Salvar como Lead
+            Criar Lead
           </button>
           <button class="wzsf-btn-secondary" data-action="conversation">
             <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
@@ -1572,7 +1574,7 @@ function createPanel() {
           </button>
           <button class="wzsf-btn-secondary" data-action="activity">
             <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>
-            Criar Atividade
+            Criar Lembrete
           </button>
           <button class="wzsf-btn-ghost" data-action="open">
             <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
@@ -1741,6 +1743,18 @@ async function handleAction(action, contact, conversation, panel) {
     return;
   }
 
+  // "Registrar Contato" — usa o Lead/Opp atual do badge, sem modal de confirmação
+  if (action === 'conversation') {
+    await handleRegisterConversation(panel, contact, conversation);
+    return;
+  }
+
+  // "Criar Atividade" — lembrete com data/hora, vinculado ao Lead/Opp atual
+  if (action === 'activity') {
+    await handleCreateReminder(panel, contact);
+    return;
+  }
+
   const confirmed = await showConfirmModal(contact, action);
   if (!confirmed) return;
 
@@ -1772,31 +1786,6 @@ async function handleAction(action, contact, conversation, panel) {
         sellerPhone,
       };
 
-    } else if (action === 'conversation') {
-      msgAction = 'registerConversation';
-      msgData = {
-        phone: confirmed.phone,
-        name: confirmed.name,
-        messages: conversation,
-        messageCount: conversation.length,
-        summary: buildConversationSummary(conversation),
-        capturedAt: nowBR,
-        sellerPhone,
-        _debug: extractConversation._diag || null,
-      };
-
-    } else if (action === 'activity') {
-      const futureDate = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-      msgAction = 'createActivity';
-      msgData = {
-        phone: confirmed.phone,
-        name: confirmed.name,
-        subject: `Lembrete: contatar ${confirmed.name || confirmed.phone}`,
-        dueDate: futureDate,
-        priority: 'Normal',
-        description: `Atividade criada via WhatsApp em ${nowBR}`,
-        sellerPhone,
-      };
     }
 
     const result = await sendMessage({ action: msgAction, data: msgData });
@@ -1881,6 +1870,233 @@ function updateDisqualifyButton() {
   const hasActiveOpp  = !!currentLeadInfo?.opportunity?.oppId;
 
   btn.disabled = !(hasActiveLead || hasActiveOpp);
+}
+
+// ─── Registrar conversa como Task no Salesforce ──────────────
+// Usa o Lead/Opp atual do badge (currentLeadInfo) e o histórico
+// já extraído do WhatsApp. Sem modal de confirmação.
+async function handleRegisterConversation(panel, contact, conversation) {
+  const status = panel.querySelector('.wzsf-status');
+
+  const hasLead = !!currentLeadInfo?.leadId;
+  const hasOpp  = !!currentLeadInfo?.opportunity?.oppId;
+
+  if (!hasLead && !hasOpp) {
+    setStatus(status, 'error', '❌ Nenhum Lead ou Oportunidade ativo para vincular a conversa.');
+    setTimeout(() => clearStatus(status), 4000);
+    return;
+  }
+
+  if (!conversation || conversation.length === 0) {
+    setStatus(status, 'error', '❌ Nenhuma mensagem encontrada na conversa.');
+    setTimeout(() => clearStatus(status), 4000);
+    return;
+  }
+
+  // Opp tem prioridade (mesmo critério da desqualificação)
+  const recordType = hasOpp ? 'Opportunity' : 'Lead';
+  const recordId   = hasOpp ? currentLeadInfo.opportunity.oppId : currentLeadInfo.leadId;
+
+  // Mapeia direction (in/out) -> actor (Cliente/Vendedor)
+  const messages = conversation.map(m => ({
+    actor: m.direction === 'out' ? 'Vendedor' : 'Cliente',
+    text:  m.text,
+    time:  m.time || undefined,
+  }));
+
+  disableButtons(panel, true);
+  setStatus(status, 'loading', `⏳ Registrando conversa no ${recordType}...`);
+
+  try {
+    const resp = await sendMessage({
+      action: 'registerConversation',
+      data: {
+        recordId,
+        recordType,
+        participantName:  contact.name || currentLeadInfo.leadName || 'Cliente',
+        conversationDate: new Date().toISOString().split('T')[0],
+        messages,
+      },
+    });
+
+    if (resp?.ok) {
+      setStatus(status, 'success', `✅ Conversa registrada (${messages.length} msgs) — Activity History atualizado`);
+    } else {
+      setStatus(status, 'error', `❌ ${resp?.error || 'Erro ao registrar conversa'}`);
+    }
+  } catch (e) {
+    setStatus(status, 'error', `❌ ${e.message}`);
+  } finally {
+    disableButtons(panel, false);
+    setTimeout(() => clearStatus(status), 6000);
+  }
+}
+
+// ─── Criar lembrete (Task) com data/hora ─────────────────────
+const REMINDER_MODAL_ID = 'wzsf-reminder-modal';
+
+async function handleCreateReminder(panel, contact) {
+  const status = panel.querySelector('.wzsf-status');
+
+  const hasLead = !!currentLeadInfo?.leadId;
+  const hasOpp  = !!currentLeadInfo?.opportunity?.oppId;
+
+  if (!hasLead && !hasOpp) {
+    setStatus(status, 'error', '❌ Nenhum Lead ou Oportunidade ativo para criar o lembrete.');
+    setTimeout(() => clearStatus(status), 4000);
+    return;
+  }
+
+  const recordType = hasOpp ? 'Opportunity' : 'Lead';
+  const recordId   = hasOpp ? currentLeadInfo.opportunity.oppId : currentLeadInfo.leadId;
+  const participantName = contact.name || currentLeadInfo.leadName || 'Cliente';
+
+  const result = await showReminderModal(participantName);
+  if (!result) return; // cancelado
+
+  disableButtons(panel, true);
+  setStatus(status, 'loading', '⏳ Criando lembrete...');
+
+  try {
+    const resp = await sendMessage({
+      action: 'createActivity',
+      data: {
+        recordId,
+        recordType,
+        participantName,
+        reminderDate: result.date,
+        reminderTime: result.time,
+        description:  result.description || undefined,
+      },
+    });
+
+    if (resp?.ok) {
+      const [y, m, d] = result.date.split('-');
+      setStatus(status, 'success', `✅ Lembrete criado para ${d}/${m}/${y} às ${result.time}`);
+    } else {
+      setStatus(status, 'error', `❌ ${resp?.error || 'Erro ao criar lembrete'}`);
+    }
+  } catch (e) {
+    setStatus(status, 'error', `❌ ${e.message}`);
+  } finally {
+    disableButtons(panel, false);
+    setTimeout(() => clearStatus(status), 6000);
+  }
+}
+
+// Modal de data/hora para lembrete. Data padrão = hoje, hora padrão = 09:00.
+function showReminderModal(participantName) {
+  return new Promise(resolve => {
+    document.getElementById(REMINDER_MODAL_ID)?.remove();
+
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+
+    // Slots de 30min cobrindo o dia todo (00:00 → 23:30)
+    const timeSlots = [];
+    for (let h = 0; h < 24; h++) {
+      for (const min of ['00', '30']) {
+        timeSlots.push(`${String(h).padStart(2, '0')}:${min}`);
+      }
+    }
+
+    const modal = document.createElement('div');
+    modal.id = REMINDER_MODAL_ID;
+    modal.innerHTML = `
+      <div class="wzsf-overlay" id="wzsf-rm-overlay">
+        <div class="wzsf-disqualify-box">
+          <div class="wzsf-disqualify-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            🔔 Criar Lembrete
+          </div>
+          <div class="wzsf-disqualify-subtitle">Lembrete - ${escHtml(participantName)}</div>
+
+          <label class="wzsf-label">Data
+            <input type="date" id="wzsf-rm-date" class="wzsf-input" value="${todayStr}" min="${todayStr}">
+          </label>
+
+          <label class="wzsf-label">Hora
+            <div class="wzsf-custom-select" id="wzsf-rm-time-select" tabindex="0">
+              <div class="wzsf-custom-select__trigger" id="wzsf-rm-time-trigger">
+                <span id="wzsf-rm-time-label">09:00</span>
+                <svg class="wzsf-custom-select__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+              <div class="wzsf-custom-select__dropdown" id="wzsf-rm-time-dropdown">
+                ${timeSlots.map(t => `<div class="wzsf-custom-select__option ${t === '09:00' ? 'wzsf-custom-select__option--selected' : ''}" data-value="${t}">${t}</div>`).join('')}
+              </div>
+            </div>
+          </label>
+
+          <label class="wzsf-label">Observação (opcional)
+            <input type="text" id="wzsf-rm-desc" class="wzsf-input" placeholder="Ex: retornar sobre proposta">
+          </label>
+
+          <div class="wzsf-modal-actions">
+            <button id="wzsf-rm-cancel" class="wzsf-btn-ghost">Cancelar</button>
+            <button id="wzsf-rm-confirm" class="wzsf-btn-primary">Criar Lembrete</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    let selectedTime = '09:00';
+
+    const cleanup = () => {
+      document.removeEventListener('keydown', escHandler);
+      document.removeEventListener('click', outsideClickHandler);
+      modal.remove();
+    };
+    const escHandler = (e) => { if (e.key === 'Escape') { cleanup(); resolve(null); } };
+    document.addEventListener('keydown', escHandler);
+
+    // Custom-select da hora (mesmo padrão da desqualificação — imune ao tema do navegador)
+    const timeSelect   = modal.querySelector('#wzsf-rm-time-select');
+    const timeTrigger  = modal.querySelector('#wzsf-rm-time-trigger');
+    const timeLabel    = modal.querySelector('#wzsf-rm-time-label');
+    const timeDropdown = modal.querySelector('#wzsf-rm-time-dropdown');
+    const timeOptions  = timeDropdown.querySelectorAll('.wzsf-custom-select__option');
+
+    timeTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      timeSelect.classList.toggle('wzsf-custom-select--open');
+      // Rola até a opção selecionada ao abrir
+      if (timeSelect.classList.contains('wzsf-custom-select--open')) {
+        const sel = timeDropdown.querySelector('.wzsf-custom-select__option--selected');
+        if (sel) sel.scrollIntoView({ block: 'center' });
+      }
+    });
+    const outsideClickHandler = (e) => {
+      if (!timeSelect.contains(e.target)) timeSelect.classList.remove('wzsf-custom-select--open');
+    };
+    document.addEventListener('click', outsideClickHandler);
+
+    timeOptions.forEach(opt => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedTime = opt.dataset.value;
+        timeLabel.textContent = selectedTime;
+        timeOptions.forEach(o => o.classList.remove('wzsf-custom-select__option--selected'));
+        opt.classList.add('wzsf-custom-select__option--selected');
+        timeSelect.classList.remove('wzsf-custom-select--open');
+      });
+    });
+
+    modal.querySelector('#wzsf-rm-overlay').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) { cleanup(); resolve(null); }
+    });
+    modal.querySelector('#wzsf-rm-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
+    modal.querySelector('#wzsf-rm-confirm').addEventListener('click', () => {
+      const date = modal.querySelector('#wzsf-rm-date').value;
+      const description = modal.querySelector('#wzsf-rm-desc').value.trim();
+      if (!date || !selectedTime) return;
+      cleanup();
+      resolve({ date, time: selectedTime, description });
+    });
+  });
 }
 
 // ─── Modal de desqualificação ─────────────────────────────────

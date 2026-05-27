@@ -20,3 +20,6 @@ desktop.ini
 # Editor
 .vscode/settings.json
 *.log
+
+# Chave privada da extensao - NUNCA versionar
+.keys/extension-private.pem

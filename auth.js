@@ -23,61 +23,63 @@ async function generateCodeChallenge(verifier) {
     .replace(/=+$/, '');
 }
 
-// ─── Login OAuth (User-Agent Flow — sem Client Secret) ────────
+// ─── Login OAuth (Web Server Flow + PKCE — emite refresh_token) ──
 async function oauthLogin() {
   const redirectUri = chrome.identity.getRedirectURL('salesforce');
 
-  console.log('[WZ-SF] 🔐 Iniciando OAuth Salesforce (User-Agent Flow)');
+  console.log('[WZ-SF] 🔐 Iniciando OAuth Salesforce (Web Server Flow + PKCE)');
 
-  // User-Agent Flow — token retorna direto na URL, sem trocar por código
+  // PKCE: gera verifier (guardado) e challenge (enviado na URL)
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  // response_type=code → troca por token depois (com refresh_token)
   const authUrl = `${SF_CONFIG.loginUrl}/services/oauth2/authorize?` +
-    `response_type=token` +
+    `response_type=code` +
     `&client_id=${encodeURIComponent(SF_CONFIG.clientId)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&scope=${encodeURIComponent(SF_CONFIG.scopes)}` +
+    `&code_challenge=${encodeURIComponent(codeChallenge)}` +
+    `&code_challenge_method=S256` +
     `&prompt=login`;
 
   return new Promise((resolve, reject) => {
-    // Abre aba de login
     chrome.tabs.create({ url: authUrl }, (tab) => {
       const tabId = tab.id;
 
-      // Escuta mudanças de URL nesta aba
       function onTabUpdated(updatedTabId, changeInfo) {
         if (updatedTabId !== tabId || !changeInfo.url) return;
 
         const currentUrl = changeInfo.url;
-
-        // Verifica se o Salesforce redirecionou para nosso redirect URI
         if (!currentUrl.startsWith(redirectUri)) return;
 
-        // Encontrou o redirect! Limpa listener e fecha a aba
         chrome.tabs.onUpdated.removeListener(onTabUpdated);
         chrome.tabs.onRemoved.removeListener(onTabRemoved);
         chrome.tabs.remove(tabId).catch(() => {});
 
         try {
           const url = new URL(currentUrl);
-          const accessToken = url.hash.substring(1); // Remove o #
-          const params = new URLSearchParams(accessToken);
-
-          const token = params.get('access_token');
-          const error = params.get('error');
+          // Web Server Flow → code vem na QUERY (?code=...), não no hash
+          const code  = url.searchParams.get('code');
+          const error = url.searchParams.get('error');
 
           if (error) {
-            const desc = params.get('error_description') || '';
+            const desc = url.searchParams.get('error_description') || '';
             return reject(new Error(`Salesforce: ${error} — ${desc}`));
           }
-          if (!token) {
-            return reject(new Error('Access token não recebido'));
+          if (!code) {
+            return reject(new Error('Código de autorização não recebido'));
           }
 
-          console.log('[WZ-SF] ✅ Access token recebido (User-Agent Flow)');
+          console.log('[WZ-SF] ✅ Código recebido, trocando por token...');
 
-          // Extrai instance_url do hash (não loga token nem URL com query)
-          const sfInstanceUrl = params.get('instance_url') || '';
-
-          parseAndSaveToken(token, sfInstanceUrl)
+          // Troca o code por access_token + refresh_token
+          exchangeCodeForTokens(code, codeVerifier, redirectUri)
+            .then((tokens) => parseAndSaveToken(
+              tokens.access_token,
+              tokens.instance_url,
+              tokens.refresh_token,
+            ))
             .then(resolve)
             .catch(reject);
 
@@ -86,7 +88,6 @@ async function oauthLogin() {
         }
       }
 
-      // Se o usuário fechar a aba antes de completar
       function onTabRemoved(removedTabId) {
         if (removedTabId !== tabId) return;
         chrome.tabs.onUpdated.removeListener(onTabUpdated);
@@ -101,7 +102,7 @@ async function oauthLogin() {
 }
 
 // Extrai dados do token, busca userId via userinfo e salva
-async function parseAndSaveToken(accessToken, instanceUrl) {
+async function parseAndSaveToken(accessToken, instanceUrl, refreshToken) {
   // Usa instance_url do hash, ou fallback para my.salesforce.com (API URL, não Lightning)
   const apiUrl = (instanceUrl || 'https://cometa--crm.sandbox.my.salesforce.com')
     .replace('.lightning.force.com', '.my.salesforce.com')
@@ -109,6 +110,7 @@ async function parseAndSaveToken(accessToken, instanceUrl) {
 
   const tokens = {
     access_token: accessToken,
+    refresh_token: refreshToken || '',
     token_type: 'Bearer',
     instance_url: apiUrl,
     issued_at: String(Date.now()),
@@ -154,8 +156,6 @@ async function exchangeCodeForTokens(code, codeVerifier, redirectUri) {
   const body = new URLSearchParams(params);
 
   console.log('[WZ-SF] 🔄 Trocando código por token...');
-  console.log('[WZ-SF] Token URL:', `${SF_CONFIG.loginUrl}/services/oauth2/token`);
-  console.log('[WZ-SF] Client Secret configurado:', !!SF_CONFIG.clientSecret);
 
   const resp = await fetch(`${SF_CONFIG.loginUrl}/services/oauth2/token`, {
     method: 'POST',
@@ -166,16 +166,8 @@ async function exchangeCodeForTokens(code, codeVerifier, redirectUri) {
   if (!resp.ok) {
     const text = await resp.text();
     let err = {};
-    try {
-      err = JSON.parse(text);
-    } catch (_) {}
-    
-    console.group('[WZ-SF] ❌ Erro na troca de token');
-    console.log('Status:', resp.status);
-    console.log('Response:', text);
-    console.log('Parsed:', err);
-    console.groupEnd();
-    
+    try { err = JSON.parse(text); } catch (_) {}
+    console.warn('[WZ-SF] ❌ Erro na troca de token:', resp.status, err.error || '');
     throw new Error(`Token error: ${err.error_description || err.error || resp.status}`);
   }
 

@@ -52,8 +52,9 @@ const SF_CONFIG = {
   // API version
   apiVersion: 'v59.0',
 
-  // Scopes OAuth — User-Agent Flow (sem refresh_token nem offline_access)
-  scopes: 'api id chatter_api',
+  // Scopes OAuth — Web Server Flow + PKCE.
+  // refresh_token permite renovar o access_token sem novo login.
+  scopes: 'api id chatter_api refresh_token',
 
   // Redirect URI — a extensão Chrome usa chrome.identity
   // O Salesforce precisa aceitar esse redirect
