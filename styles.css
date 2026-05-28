@@ -97,11 +97,20 @@
   font-family: var(--wzsf-font-sans);
   font-size: 13px;
   font-weight: 400;
+  line-height: 1.5;
   color: var(--wzsf-foreground);
   color-scheme: light;
   user-select: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Reset agressivo: WhatsApp aplica line-height: 1 em todo *. Re-aplica. */
+#wzsf-panel,
+#wzsf-panel * { line-height: inherit; }
+#wzsf-panel button {
+  font: inherit;
+  line-height: 1.5;
 }
 
 #wzsf-panel button {
@@ -122,7 +131,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--wzsf-border);
   background: oklch(0.97 0.005 200 / 0.6);
   cursor: grab;
@@ -209,7 +218,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 14px 16px 8px;
+  padding: 14px 16px 6px;
 }
 
 .wzsf-sf-auth-status {
@@ -339,7 +348,7 @@
 .wzsf-card {
   display: flex;
   flex-direction: column;
-  margin: 4px 12px 6px;
+  margin: 6px 14px 4px;
   padding: 14px;
   background: oklch(0.97 0.005 200 / 0.5);
   border: 1px solid var(--wzsf-border);
@@ -353,8 +362,8 @@
 }
 
 .wzsf-avatar {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   background: oklch(0.62 0.12 175 / 0.10);
   color: var(--wzsf-primary);
   border-radius: var(--wzsf-radius);
@@ -367,7 +376,7 @@
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
-.wzsf-avatar svg { width: 16px; height: 16px; }
+.wzsf-avatar svg { width: 18px; height: 18px; }
 
 .wzsf-contact-info { flex: 1; min-width: 0; }
 
@@ -379,8 +388,9 @@
 }
 
 .wzsf-contact-name {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 1.3;
   color: var(--wzsf-foreground);
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -392,7 +402,8 @@
 
 .wzsf-contact-phone {
   font-family: var(--wzsf-font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--wzsf-muted-fg);
   margin-top: 3px;
   font-variant-numeric: tabular-nums;
@@ -447,17 +458,18 @@
   align-items: center;
   gap: 6px;
   margin-top: 10px;
-  padding: 3px 10px 3px 8px;
+  padding: 4px 10px 4px 9px;
   background: oklch(0.93 0.08 80);
   border-radius: 9999px;
   font-size: 11px;
   font-weight: 500;
+  line-height: 1.4;
   color: oklch(0.44 0.10 75);
   box-shadow: inset 0 0 0 1px oklch(0.86 0.10 80);
   max-width: 100%;
   width: fit-content;
 }
-.wzsf-lead-badge svg.wzsf-lead-icon { width: 11px; height: 11px; flex-shrink: 0; }
+.wzsf-lead-badge svg.wzsf-lead-icon { width: 12px; height: 12px; flex-shrink: 0; }
 
 /* Variante: lead encontrado (verde) */
 .wzsf-lead-badge.wzsf-lead-badge--found {
@@ -545,13 +557,13 @@
 .wzsf-opp-stage { color: var(--wzsf-muted-fg); font-size: 10.5px; padding-left: 18px; }
 
 /* =============================================
-   AÇÕES (respiração suficiente p/ leitura tranquila)
+   AÇÕES (proporções iguais à referência React)
    ============================================= */
 .wzsf-actions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 12px 10px;
+  gap: 8px;
+  padding: 16px 14px 12px;
 }
 
 /* Base de botão de ação */
@@ -564,10 +576,12 @@
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  padding: 11px 14px;
+  padding: 12px 14px;
+  min-height: 44px;
   border-radius: var(--wzsf-radius);
   font-size: 13px;
   font-weight: 500;
+  line-height: 1.4;
   letter-spacing: -0.005em;
   cursor: pointer;
   text-align: left;
@@ -620,7 +634,8 @@
 .wzsf-btn-danger {
   background: transparent;
   color: var(--wzsf-muted-fg);
-  padding: 10px 14px;
+  padding: 11px 14px;
+  min-height: 42px;
 }
 .wzsf-btn-danger .wzsf-btn-label,
 .wzsf-btn-danger .wzsf-icon { transition: color 150ms ease; }
@@ -666,7 +681,7 @@
 /* Seção destrutiva separada por border-top */
 .wzsf-destructive-section {
   border-top: 1px solid var(--wzsf-border);
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 .wzsf-actions-divider { display: none; }
 
@@ -719,12 +734,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 10px 14px;
   border-top: 1px solid var(--wzsf-border);
   background: oklch(0.97 0.005 200 / 0.6);
   font-size: 11px;
+  line-height: 1.4;
   color: var(--wzsf-muted-fg);
-  min-height: 30px;
+  min-height: 36px;
 }
 
 .wzsf-status-left {
