@@ -271,21 +271,27 @@ function updateSfAuthIndicator() {
   const indicator = panel.querySelector('.wzsf-sf-auth');
   if (!indicator) return;
 
-  const dot = indicator.querySelector('.wzsf-sf-auth-dot');
-  const text = indicator.querySelector('.wzsf-sf-auth-text');
-  const loginBtn = indicator.querySelector('#wzsf-sf-login');
-  const logoutBtn = indicator.querySelector('#wzsf-sf-logout');
+  const dot       = indicator.querySelector('.wzsf-sf-auth-dot');
+  const text      = indicator.querySelector('.wzsf-sf-auth-text');
+  const trigger   = indicator.querySelector('#wzsf-sf-account-trigger');
+  const chevron   = indicator.querySelector('.wzsf-sf-chevron');
+  const loginBtn  = indicator.querySelector('#wzsf-sf-login');
+  const escHint   = indicator.querySelector('#wzsf-account-esc-hint');
 
   if (sfAuthenticated) {
     dot.className = 'wzsf-sf-auth-dot wzsf-dot-online';
     text.textContent = sfUserName || 'Salesforce conectado';
+    if (chevron) chevron.style.display = '';
+    if (trigger) { trigger.style.display = ''; trigger.disabled = false; }
     if (loginBtn) loginBtn.style.display = 'none';
-    if (logoutBtn) logoutBtn.style.display = '';
+    if (escHint) escHint.style.display = '';
   } else {
     dot.className = 'wzsf-sf-auth-dot wzsf-dot-offline';
     text.textContent = 'Salesforce desconectado';
+    if (chevron) chevron.style.display = 'none';
+    if (trigger) { trigger.style.display = ''; trigger.disabled = true; }
     if (loginBtn) loginBtn.style.display = '';
-    if (logoutBtn) logoutBtn.style.display = 'none';
+    if (escHint) escHint.style.display = 'none';
   }
 }
 
@@ -472,18 +478,19 @@ function updateLeadBadge() {
   // Atualiza visibilidade do botão Desqualificar sempre que o badge muda
   updateDisqualifyButton();
 
-  const card = panel.querySelector('.wzsf-card');
-  if (!card) return;
+  // Badge agora vive dentro de .wzsf-contact-info (abaixo do telefone)
+  const host = panel.querySelector('.wzsf-contact-info');
+  if (!host) return;
 
-  let badge = card.querySelector('.wzsf-lead-badge');
+  let badge = host.querySelector('.wzsf-lead-badge');
 
   // ── Carregando — desabilita todos os botões até ter resultado ─
   if (lookupInProgress) {
     if (!badge) {
       badge = document.createElement('div');
-      badge.className = 'wzsf-lead-badge';
-      card.appendChild(badge);
+      host.appendChild(badge);
     }
+    badge.className = 'wzsf-lead-badge wzsf-lead-badge--loading';
     badge.innerHTML = `
       <span class="wzsf-lead-dot wzsf-dot-loading"></span>
       <span class="wzsf-lead-text">Buscando Lead...</span>
@@ -504,11 +511,11 @@ function updateLeadBadge() {
   if (currentLeadInfo) {
     if (!badge) {
       badge = document.createElement('div');
-      badge.className = 'wzsf-lead-badge';
-      card.appendChild(badge);
+      host.appendChild(badge);
     }
 
     const isMyLead = !sfUserId || currentLeadInfo.ownerId === sfUserId;
+    badge.className = `wzsf-lead-badge ${isMyLead ? 'wzsf-lead-badge--found' : 'wzsf-lead-badge--other'}`;
     const encerrado = currentLeadInfo.encerrado || false;
     const opp = currentLeadInfo.opportunity;
 
@@ -583,11 +590,11 @@ function updateLeadBadge() {
     // Nenhum Lead encontrado
     if (!badge) {
       badge = document.createElement('div');
-      badge.className = 'wzsf-lead-badge';
-      card.appendChild(badge);
+      host.appendChild(badge);
     }
+    badge.className = 'wzsf-lead-badge';
     badge.innerHTML = `
-      <svg class="wzsf-lead-icon" aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <svg class="wzsf-lead-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <span class="wzsf-lead-text">Sem leads vinculados</span>
     `;
     badge.style.display = 'inline-flex';
@@ -1587,62 +1594,87 @@ function createPanel() {
     <!-- CONTENT -->
     <div class="wzsf-content">
       <div class="wzsf-tab-content">
-        <div class="wzsf-sf-auth">
-          <div class="wzsf-sf-auth-status">
+
+        <!-- Account row: dot + name + chevron + Esc -->
+        <div class="wzsf-sf-auth" style="position:relative;">
+          <button id="wzsf-sf-account-trigger" class="wzsf-sf-auth-status" type="button" aria-haspopup="menu" aria-expanded="false">
             <span class="wzsf-sf-auth-dot wzsf-dot-offline" aria-hidden="true"></span>
             <span class="wzsf-sf-auth-text">Salesforce desconectado</span>
-          </div>
+            <svg class="wzsf-sf-chevron" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
           <button id="wzsf-sf-login" class="wzsf-sf-login-btn" title="Entrar no Salesforce">
             <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
             <span class="wzsf-btn-text">Entrar</span>
           </button>
+          <span id="wzsf-account-esc-hint" class="wzsf-kbd" style="display:none;">Esc</span>
           <button id="wzsf-sf-logout" class="wzsf-sf-logout-btn" title="Sair do Salesforce" style="display:none;">
-            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             <span class="wzsf-btn-text">Sair</span>
           </button>
+          <div id="wzsf-account-menu" class="wzsf-account-menu" role="menu" aria-hidden="true">
+            <button id="wzsf-account-logout" role="menuitem" type="button">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              Sair do Salesforce
+            </button>
+          </div>
         </div>
 
         <!-- Card Contato -->
         <div class="wzsf-card">
           <div class="wzsf-card-row">
             <div class="wzsf-avatar" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
             </div>
             <div class="wzsf-contact-info">
-              <div class="wzsf-contact-name">Aguardando contato...</div>
+              <div class="wzsf-contact-info-row">
+                <div class="wzsf-contact-name">Aguardando contato...</div>
+                <button class="wzsf-btn-chevron" id="wzsf-refresh" aria-label="Sincronizar contato" title="Atualizar status do Lead/Oportunidade">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                </button>
+              </div>
               <div class="wzsf-contact-phone">—</div>
+              <!-- lead-badge é injetado aqui dinamicamente por updateLeadBadge() -->
             </div>
-            <button class="wzsf-btn-chevron" id="wzsf-refresh" aria-label="Atualizar status" title="Atualizar status do Lead/Oportunidade">
-              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-            </button>
           </div>
         </div>
 
         <!-- Ações -->
         <div class="wzsf-actions">
           <button class="wzsf-btn-primary" data-action="lead" data-shortcut="lead">
-            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></span>
-            <span class="wzsf-btn-label">Criar lead</span>
+            <span class="wzsf-btn-label">
+              <span class="wzsf-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></span>
+              <span>Criar lead</span>
+            </span>
             <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${MOD}</span><span class="wzsf-kbd">L</span></span>
           </button>
           <button class="wzsf-btn-secondary" data-action="conversation" data-shortcut="conversation">
-            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
-            <span class="wzsf-btn-label">Registrar contato</span>
+            <span class="wzsf-btn-label">
+              <span class="wzsf-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+              <span>Registrar contato</span>
+            </span>
             <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${MOD}</span><span class="wzsf-kbd">R</span></span>
           </button>
           <button class="wzsf-btn-secondary" data-action="activity" data-shortcut="activity">
-            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>
-            <span class="wzsf-btn-label">Criar lembrete</span>
+            <span class="wzsf-btn-label">
+              <span class="wzsf-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>
+              <span>Criar lembrete</span>
+            </span>
             <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${MOD}</span><span class="wzsf-kbd">D</span></span>
           </button>
           <button class="wzsf-btn-ghost" data-action="open">
-            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
-            <span class="wzsf-btn-label">Abrir no Salesforce</span>
+            <span class="wzsf-btn-label">
+              <span class="wzsf-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
+              <span>Abrir no Salesforce</span>
+            </span>
           </button>
-          <div class="wzsf-actions-divider" role="separator"></div>
+        </div>
+
+        <!-- Seção destrutiva separada -->
+        <div class="wzsf-destructive-section">
           <button class="wzsf-btn-danger" data-action="disqualify" data-shortcut="disqualify" id="wzsf-btn-disqualify" disabled>
-            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>
-            <span class="wzsf-btn-label">Desqualificar lead</span>
+            <span class="wzsf-btn-label">
+              <span class="wzsf-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>
+              <span>Desqualificar lead</span>
+            </span>
             <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${SHIFT_KEY}</span><span class="wzsf-kbd">X</span></span>
           </button>
         </div>
@@ -1690,17 +1722,46 @@ function createPanel() {
     sfLoginBtn.addEventListener('click', triggerSfLogin);
   }
 
-  // ─── Botão SF Logout ─────────────────────────────────────────
-  const sfLogoutBtn = panel.querySelector('#wzsf-sf-logout');
-  if (sfLogoutBtn) {
-    sfLogoutBtn.addEventListener('click', () => {
-      sfLogoutBtn.disabled = true;
-      const lt = sfLogoutBtn.querySelector('.wzsf-btn-text');
-      if (lt) lt.textContent = 'Saindo...';
-      chrome.runtime.sendMessage({ action: 'sfLogout' }, (resp) => {
-        sfLogoutBtn.disabled = false;
-        if (lt) lt.textContent = 'Sair';
-        if (chrome.runtime.lastError) return;
+  // ─── Conta: dropdown (chevron) + item Sair ───────────────────
+  const accountTrigger = panel.querySelector('#wzsf-sf-account-trigger');
+  const accountMenu    = panel.querySelector('#wzsf-account-menu');
+  const accountLogout  = panel.querySelector('#wzsf-account-logout');
+
+  const closeAccountMenu = () => {
+    if (!accountMenu) return;
+    accountMenu.classList.remove('wzsf-account-menu--open');
+    accountMenu.setAttribute('aria-hidden', 'true');
+    accountTrigger?.setAttribute('aria-expanded', 'false');
+  };
+  const toggleAccountMenu = () => {
+    if (!accountMenu) return;
+    const open = accountMenu.classList.toggle('wzsf-account-menu--open');
+    accountMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+    accountTrigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+
+  if (accountTrigger) {
+    accountTrigger.addEventListener('click', (e) => {
+      if (!sfAuthenticated) return; // sem auth, o trigger não abre menu
+      e.stopPropagation();
+      toggleAccountMenu();
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (!accountMenu?.classList.contains('wzsf-account-menu--open')) return;
+    if (accountMenu.contains(e.target) || accountTrigger?.contains(e.target)) return;
+    closeAccountMenu();
+  });
+
+  if (accountLogout) {
+    accountLogout.addEventListener('click', () => {
+      accountLogout.disabled = true;
+      const orig = accountLogout.innerHTML;
+      accountLogout.textContent = 'Saindo...';
+      chrome.runtime.sendMessage({ action: 'sfLogout' }, () => {
+        accountLogout.disabled = false;
+        accountLogout.innerHTML = orig;
+        closeAccountMenu();
         sfAuthenticated = false;
         sfUserName = '';
         updateSfAuthIndicator();
