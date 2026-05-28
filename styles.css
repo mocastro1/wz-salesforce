@@ -75,16 +75,20 @@
   --wzsf-font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
 
-/* ── Reset: isola contra CSS do WhatsApp Web ── */
-#wzsf-panel,
-#wzsf-panel *,
-#wzsf-panel *::before,
-#wzsf-panel *::after,
-.wzsf-overlay,
-.wzsf-overlay *,
-.wzsf-overlay *::before,
-.wzsf-overlay *::after,
-.wzsf-fab {
+/* ── Reset: isola contra CSS do WhatsApp Web ──
+   Usa :where() pra ter especificidade ZERO — assim os estilos
+   por classe (.wzsf-btn-primary etc) vencem sem precisar !important. */
+:where(
+  #wzsf-panel,
+  #wzsf-panel *,
+  #wzsf-panel *::before,
+  #wzsf-panel *::after,
+  .wzsf-overlay,
+  .wzsf-overlay *,
+  .wzsf-overlay *::before,
+  .wzsf-overlay *::after,
+  .wzsf-fab
+) {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -94,26 +98,24 @@
   text-rendering: optimizeLegibility;
 }
 
-#wzsf-panel button,
-.wzsf-overlay button {
+:where(#wzsf-panel button, .wzsf-overlay button) {
   font: inherit;
   background: transparent;
   border: 0;
   cursor: pointer;
+  color: inherit;
 }
 
-#wzsf-panel input,
-#wzsf-panel select,
-#wzsf-panel textarea,
-.wzsf-overlay input,
-.wzsf-overlay select,
-.wzsf-overlay textarea {
+:where(#wzsf-panel input, #wzsf-panel select, #wzsf-panel textarea,
+       .wzsf-overlay input, .wzsf-overlay select, .wzsf-overlay textarea) {
   font: inherit;
   color: inherit;
 }
 
-#wzsf-panel svg,
-.wzsf-overlay svg { display: block; flex-shrink: 0; }
+:where(#wzsf-panel svg, .wzsf-overlay svg) {
+  display: block;
+  flex-shrink: 0;
+}
 
 /* =============================================
    PAINEL — w-[340px] rounded-2xl shadow-xl ring-1
