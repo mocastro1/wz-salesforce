@@ -488,7 +488,7 @@ function updateLeadBadge() {
       <span class="wzsf-lead-dot wzsf-dot-loading"></span>
       <span class="wzsf-lead-text">Buscando Lead...</span>
     `;
-    badge.style.display = 'flex';
+    badge.style.display = 'inline-flex';
     // Desabilita todos os botões durante a busca — evita flickering
     const actionsEl = panel.querySelector('.wzsf-actions');
     if (actionsEl) {
@@ -587,10 +587,10 @@ function updateLeadBadge() {
       card.appendChild(badge);
     }
     badge.innerHTML = `
-      <span class="wzsf-lead-dot wzsf-dot-offline"></span>
-      <span class="wzsf-lead-text">Nenhum Lead encontrado</span>
+      <svg class="wzsf-lead-icon" aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span class="wzsf-lead-text">Sem leads vinculados</span>
     `;
-    badge.style.display = 'flex';
+    badge.style.display = 'inline-flex';
   }
   // Botões são gerenciados exclusivamente por updateActionButtons()
   // para evitar flickering — não alterar disabled aqui.
@@ -1559,7 +1559,9 @@ function updatePanel() {
 function createPanel() {
   const panel = document.createElement('div');
   panel.id = PANEL_ID;
-  const MOD = navigator.platform.toUpperCase().includes('MAC') ? '⌘' : 'Ctrl';
+  const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
+  const MOD = IS_MAC ? '⌘' : 'Ctrl';
+  const SHIFT_KEY = IS_MAC ? '⇧' : 'Shift';
   panel.innerHTML = `
     <!-- HEADER -->
     <div class="wzsf-header">
@@ -1602,16 +1604,18 @@ function createPanel() {
 
         <!-- Card Contato -->
         <div class="wzsf-card">
-          <div class="wzsf-avatar" aria-hidden="true">
-            <span class="wzsf-avatar-initials">—</span>
+          <div class="wzsf-card-row">
+            <div class="wzsf-avatar" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            </div>
+            <div class="wzsf-contact-info">
+              <div class="wzsf-contact-name">Aguardando contato...</div>
+              <div class="wzsf-contact-phone">—</div>
+            </div>
+            <button class="wzsf-btn-chevron" id="wzsf-refresh" aria-label="Atualizar status" title="Atualizar status do Lead/Oportunidade">
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+            </button>
           </div>
-          <div class="wzsf-contact-info">
-            <div class="wzsf-contact-name">Aguardando contato...</div>
-            <div class="wzsf-contact-phone">—</div>
-          </div>
-          <button class="wzsf-btn-chevron" id="wzsf-refresh" aria-label="Atualizar status" title="Atualizar status do Lead/Oportunidade">
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-          </button>
         </div>
 
         <!-- Ações -->
@@ -1639,7 +1643,7 @@ function createPanel() {
           <button class="wzsf-btn-danger" data-action="disqualify" data-shortcut="disqualify" id="wzsf-btn-disqualify" disabled>
             <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>
             <span class="wzsf-btn-label">Desqualificar lead</span>
-            <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">⇧</span><span class="wzsf-kbd">X</span></span>
+            <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${SHIFT_KEY}</span><span class="wzsf-kbd">X</span></span>
           </button>
         </div>
       </div>
@@ -1652,8 +1656,9 @@ function createPanel() {
         <span class="wzsf-status-text">Conectando...</span>
       </div>
       <div class="wzsf-status-hint">
+        <span>Pressione</span>
         <span class="wzsf-kbd">Esc</span>
-        <span>fechar</span>
+        <span>para fechar</span>
       </div>
     </div>
   `;

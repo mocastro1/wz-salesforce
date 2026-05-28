@@ -119,9 +119,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--wzsf-border);
-  background: var(--wzsf-card);
+  padding: 12px 14px;
+  background: var(--wzsf-secondary);
   cursor: grab;
 }
 .wzsf-header:active { cursor: grabbing; }
@@ -129,19 +128,20 @@
 .wzsf-header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .wzsf-logo {
-  width: 24px;
-  height: 24px;
-  background: var(--wzsf-primary-soft);
-  border-radius: var(--wzsf-radius-sm);
+  width: 28px;
+  height: 28px;
+  background: var(--wzsf-primary);
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: var(--wzsf-primary);
+  color: var(--wzsf-primary-fg);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
 }
 .wzsf-logo svg { width: 14px; height: 14px; }
 
@@ -153,16 +153,22 @@
 }
 
 .wzsf-version {
-  font-size: 11px;
+  display: inline-block;
+  font-size: 10.5px;
   color: var(--wzsf-muted-fg);
-  margin-left: 6px;
-  font-weight: 400;
+  margin-left: 8px;
+  padding: 1px 7px;
+  background: var(--wzsf-card);
+  border: 1px solid var(--wzsf-border);
+  border-radius: 9999px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+  vertical-align: middle;
 }
 
 .wzsf-header-actions {
   display: flex;
-  gap: 2px;
+  gap: 4px;
 }
 
 .wzsf-btn-header {
@@ -180,7 +186,7 @@
   flex-shrink: 0;
 }
 .wzsf-btn-header:hover {
-  background: var(--wzsf-secondary);
+  background: var(--wzsf-card);
   color: var(--wzsf-foreground);
 }
 
@@ -194,9 +200,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--wzsf-border);
+  gap: 10px;
+  padding: 12px 16px 8px;
 }
 
 .wzsf-sf-auth-status {
@@ -213,6 +218,9 @@
   border-radius: 9999px;
   flex-shrink: 0;
 }
+.wzsf-sf-auth-dot.wzsf-dot-online {
+  background: var(--wzsf-success);
+}
 .wzsf-sf-auth-dot.wzsf-dot-online::after {
   content: '';
   position: absolute;
@@ -227,8 +235,8 @@
 }
 
 .wzsf-sf-auth-text {
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--wzsf-foreground);
   white-space: nowrap;
   overflow: hidden;
@@ -236,45 +244,67 @@
   letter-spacing: -0.005em;
 }
 
-.wzsf-sf-login-btn,
-.wzsf-sf-logout-btn {
+.wzsf-sf-login-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--wzsf-border);
+  padding: 6px 12px;
+  border: none;
   border-radius: var(--wzsf-radius-sm);
-  background: var(--wzsf-card);
-  color: var(--wzsf-foreground);
+  background: var(--wzsf-primary);
+  color: var(--wzsf-primary-fg);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 150ms ease;
+  transition: filter 150ms ease;
   white-space: nowrap;
 }
-.wzsf-sf-login-btn { background: var(--wzsf-primary); color: var(--wzsf-primary-fg); border-color: transparent; }
 .wzsf-sf-login-btn:hover { filter: brightness(0.95); }
-.wzsf-sf-logout-btn:hover { background: var(--wzsf-secondary); }
-.wzsf-sf-login-btn:disabled,
+.wzsf-sf-login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Logout: ghost discreto */
+.wzsf-sf-logout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--wzsf-radius-sm);
+  background: transparent;
+  color: var(--wzsf-muted-fg);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+  white-space: nowrap;
+}
+.wzsf-sf-logout-btn:hover { background: var(--wzsf-secondary); color: var(--wzsf-foreground); }
 .wzsf-sf-logout-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.wzsf-sf-logout-btn svg { width: 11px; height: 11px; }
 
 /* =============================================
    CARD DE CONTATO
    ============================================= */
 .wzsf-card {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
-  padding: 12px;
-  margin: 12px;
+  padding: 14px;
+  margin: 8px 16px 14px;
   background: var(--wzsf-card);
   border: 1px solid var(--wzsf-border);
   border-radius: var(--wzsf-radius-lg);
 }
 
+.wzsf-card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .wzsf-avatar {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   background: var(--wzsf-primary-soft);
   color: var(--wzsf-primary);
   border-radius: 9999px;
@@ -282,7 +312,7 @@
   align-items: center;
   justify-content: center;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 13px;
   letter-spacing: -0.02em;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
@@ -292,7 +322,7 @@
 .wzsf-contact-info { flex: 1; min-width: 0; }
 
 .wzsf-contact-name {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--wzsf-foreground);
   letter-spacing: -0.01em;
@@ -303,9 +333,9 @@
 
 .wzsf-contact-phone {
   font-family: var(--wzsf-font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--wzsf-muted-fg);
-  margin-top: 2px;
+  margin-top: 3px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
@@ -333,21 +363,33 @@
 .wzsf-spinning svg { animation: wzsf-spin 0.8s linear infinite; }
 
 /* =============================================
-   LEAD BADGE (status do contato)
+   LEAD BADGE (status do contato — dentro do card)
    ============================================= */
 .wzsf-lead-badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 0 12px 12px;
-  padding: 6px 10px;
+  padding: 5px 10px 5px 9px;
   background: var(--wzsf-warning-soft);
   border: 1px solid transparent;
   border-radius: 9999px;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--wzsf-warning-fg);
-  width: fit-content;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+/* Quando tem detalhes adicionais (warning ou opp), vira bloco */
+.wzsf-lead-badge:has(.wzsf-opp-block),
+.wzsf-lead-badge:has(.wzsf-owner-warning) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-self: stretch;
+  border-radius: var(--wzsf-radius);
+  padding: 8px 10px;
+  gap: 6px;
 }
 .wzsf-lead-link {
   display: inline-flex;
@@ -410,8 +452,8 @@
 .wzsf-actions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 0 8px 8px;
+  gap: 6px;
+  padding: 0 16px 14px;
 }
 
 /* Base de botão de ação */
@@ -421,12 +463,12 @@
 .wzsf-btn-danger {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 11px 12px;
   border-radius: var(--wzsf-radius);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   letter-spacing: -0.005em;
   cursor: pointer;
   text-align: left;
@@ -441,6 +483,8 @@
 .wzsf-btn-primary {
   background: var(--wzsf-primary);
   color: var(--wzsf-primary-fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
 }
 .wzsf-btn-primary:hover { filter: brightness(0.95); }
 .wzsf-btn-primary:disabled {
@@ -448,6 +492,7 @@
   color: var(--wzsf-muted-fg);
   cursor: not-allowed;
   filter: none;
+  box-shadow: none;
 }
 
 .wzsf-btn-secondary {
@@ -466,32 +511,35 @@
 .wzsf-btn-ghost {
   background: transparent;
   color: var(--wzsf-muted-fg);
+  padding-left: 12px;
 }
 .wzsf-btn-ghost:hover { background: var(--wzsf-secondary); color: var(--wzsf-foreground); }
 
 .wzsf-btn-danger {
   background: transparent;
-  color: var(--wzsf-destructive);
+  color: oklch(0.55 0.16 25);
+  padding-left: 12px;
 }
-.wzsf-btn-danger:hover { background: var(--wzsf-destructive-soft); }
+.wzsf-btn-danger:hover { background: var(--wzsf-destructive-soft); color: var(--wzsf-destructive); }
 .wzsf-btn-danger:disabled {
   color: var(--wzsf-muted-fg);
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 .wzsf-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 .wzsf-icon svg { width: 16px; height: 16px; }
 
 .wzsf-btn-secondary .wzsf-icon,
 .wzsf-btn-ghost .wzsf-icon { color: var(--wzsf-muted-fg); }
+.wzsf-btn-danger .wzsf-icon { color: currentColor; opacity: 0.9; }
 
 /* Label do botão (centro-esquerda) */
 .wzsf-btn-label { flex: 1; }
@@ -507,7 +555,7 @@
 .wzsf-actions-divider {
   height: 1px;
   background: var(--wzsf-border);
-  margin: 6px 4px;
+  margin: 8px 4px 4px;
 }
 
 /* =============================================
@@ -518,15 +566,16 @@
   align-items: center;
   justify-content: center;
   min-width: 18px;
-  padding: 1px 5px;
+  height: 18px;
+  padding: 0 5px;
   border: 1px solid var(--wzsf-border);
   border-radius: 4px;
-  background: var(--wzsf-secondary);
+  background: var(--wzsf-card);
   color: var(--wzsf-muted-fg);
-  font-family: var(--wzsf-font-mono);
-  font-size: 10px;
-  font-weight: 400;
-  line-height: 1.4;
+  font-family: var(--wzsf-font-sans);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
   box-shadow: inset 0 -1px 0 var(--wzsf-border);
   font-variant-numeric: tabular-nums;
 }
@@ -537,6 +586,19 @@
   margin-left: auto;
 }
 
+/* Kbd dentro de botão primário: invertido */
+.wzsf-btn-primary .wzsf-kbd {
+  background: rgb(255 255 255 / 0.18);
+  border-color: rgb(255 255 255 / 0.12);
+  color: var(--wzsf-primary-fg);
+  box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.10);
+}
+
+/* Kbd na status bar: bg mais claro */
+.wzsf-status .wzsf-kbd {
+  background: var(--wzsf-card);
+}
+
 /* =============================================
    STATUS BAR (rodapé persistente)
    ============================================= */
@@ -545,12 +607,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 16px;
   border-top: 1px solid var(--wzsf-border);
   background: var(--wzsf-secondary);
   font-size: 11px;
   color: var(--wzsf-muted-fg);
-  min-height: 30px;
+  min-height: 32px;
 }
 
 .wzsf-status-left {
