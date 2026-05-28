@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>SF Sync — Teste isolado do painel</title>
+<style>
+  /* Background simulando WhatsApp Web */
+  html, body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 20% 20%, oklch(0.92 0.03 175 / 0.6) 0px, transparent 40%),
+      radial-gradient(circle at 80% 80%, oklch(0.93 0.02 150 / 0.6) 0px, transparent 40%),
+      oklch(0.94 0.01 150);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  /* Container que centraliza o painel */
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+
+  .label {
+    text-align: center;
+    margin-bottom: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: oklch(0.40 0.02 200);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Reset relative em vez de fixed pra ver inline */
+  #wzsf-panel { position: relative !important; top: auto !important; right: auto !important; }
+
+  .col { display: flex; flex-direction: column; align-items: center; }
+</style>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="stage">
+
+  <div class="col">
+    <div class="label">Estado: sem lead</div>
+
+    <div id="wzsf-panel">
+      <div class="wzsf-header">
+        <div class="wzsf-header-left">
+          <div class="wzsf-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <span class="wzsf-title">SF Sync</span>
+          <span class="wzsf-version">v2.7.0</span>
+        </div>
+        <div class="wzsf-header-actions">
+          <button class="wzsf-btn-header"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
+          <button class="wzsf-btn-header" id="wzsf-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </div>
+      </div>
+
+      <div class="wzsf-content">
+        <div class="wzsf-tab-content">
+
+          <div class="wzsf-sf-auth">
+            <button class="wzsf-sf-auth-status">
+              <span class="wzsf-sf-auth-dot wzsf-dot-online"></span>
+              <span class="wzsf-sf-auth-text">Maycon Castro</span>
+              <svg class="wzsf-sf-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <span class="wzsf-kbd">Esc</span>
+          </div>
+
+          <div class="wzsf-card">
+            <div class="wzsf-card-row">
+              <div class="wzsf-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              </div>
+              <div class="wzsf-contact-info">
+                <div class="wzsf-contact-info-row">
+                  <div class="wzsf-contact-name">William Castro</div>
+                  <button class="wzsf-btn-chevron">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                  </button>
+                </div>
+                <div class="wzsf-contact-phone">+55 65 9 9640-2200</div>
+                <div class="wzsf-lead-badge">
+                  <svg class="wzsf-lead-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span class="wzsf-lead-text">Sem leads vinculados</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="wzsf-actions">
+            <button class="wzsf-btn-primary">
+              <span class="wzsf-btn-label">
+                <span class="wzsf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></span>
+                <span>Criar lead</span>
+              </span>
+              <span class="wzsf-kbd-group"><span class="wzsf-kbd">⌘</span><span class="wzsf-kbd">L</span></span>
+            </button>
+            <button class="wzsf-btn-secondary">
+              <span class="wzsf-btn-label">
+                <span class="wzsf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                <span>Registrar contato</span>
+              </span>
+              <span class="wzsf-kbd-group"><span class="wzsf-kbd">⌘</span><span class="wzsf-kbd">R</span></span>
+            </button>
+            <button class="wzsf-btn-secondary">
+              <span class="wzsf-btn-label">
+                <span class="wzsf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>
+                <span>Criar lembrete</span>
+              </span>
+              <span class="wzsf-kbd-group"><span class="wzsf-kbd">⌘</span><span class="wzsf-kbd">D</span></span>
+            </button>
+            <button class="wzsf-btn-ghost">
+              <span class="wzsf-btn-label">
+                <span class="wzsf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
+                <span>Abrir no Salesforce</span>
+              </span>
+            </button>
+          </div>
+
+          <div class="wzsf-destructive-section">
+            <button class="wzsf-btn-danger">
+              <span class="wzsf-btn-label">
+                <span class="wzsf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>
+                <span>Desqualificar lead</span>
+              </span>
+              <span class="wzsf-kbd-group"><span class="wzsf-kbd">Shift</span><span class="wzsf-kbd">X</span></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wzsf-status">
+        <div class="wzsf-status-left">
+          <span class="wzsf-status-dot"></span>
+          <span class="wzsf-status-text">Sincronizado</span>
+        </div>
+        <div class="wzsf-status-hint">
+          <span>Pressione</span>
+          <span class="wzsf-kbd">Esc</span>
+          <span>para fechar</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
