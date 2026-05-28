@@ -7,11 +7,12 @@
   "permissions": ["activeTab", "storage", "identity", "tabs"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
-    "http://localhost:3000/*",
-    "https://cometa--crm.sandbox.lightning.force.com/*",
-    "https://cometa--crm.sandbox.my.salesforce.com/*",
-    "https://test.salesforce.com/*",
-    "https://*.salesforce.com/*"
+    "https://wz-api.grupocometa.com.br/*",
+    "https://cometa.my.salesforce.com/*",
+    "https://cometa.lightning.force.com/*",
+    "https://login.salesforce.com/*",
+    "https://*.salesforce.com/*",
+    "https://*.force.com/*"
   ],
   "background": {
     "service_worker": "background.js"

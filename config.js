@@ -1,13 +1,14 @@
 // ============================================================
-// config.js — Configuração da API (wz-api BFF) e Salesforce
+// config.js — Configuracao da API (wz-api BFF) e Salesforce
 // ============================================================
 
 const API_CONFIG = {
-  // Troque pela URL de produção quando publicar
-  baseUrl: 'http://localhost:3000',
+  // URL de producao
+  baseUrl: 'https://wz-api.grupocometa.com.br',
 
   // Bearer token compartilhado com o wz-api (campo API_BEARER_TOKEN no .env)
-  apiToken: 'meu-token-secreto',
+  // ATENCAO: precisa ser identico ao token gerado pelo deploy.sh no servidor
+  apiToken: 'COLAR_AQUI_O_TOKEN_GERADO_PELO_DEPLOY_SH',
 
   endpoints: {
     saveLead:             '/api/leads',
@@ -36,18 +37,18 @@ const WEBHOOK_CONFIG = API_CONFIG;
 
 // ─── Salesforce OAuth 2.0 (PKCE) ────────────────────────────
 const SF_CONFIG = {
-  // Cole aqui o Consumer Key da sua Connected App
-  clientId: '3MVG9bjNVlqB8yGFZloAO1fWFeqVDWCHAiAidVUivMvMowz6vsLAc_ry03jimsCe6UAPjO2HcLRVno9Es1HNY',
+  // Consumer Key da Connected App em PRODUCAO (cometa.my.salesforce.com)
+  clientId: '3MVG9cHH2bfKACZby2CWjAoqzBlNUyD55Rc3.l7X8QSYV.WCmZl7YjovY2v2ZNIYjXQDHk2l9NDQtvzCJoZHl',
 
-  // Cole aqui o Consumer Secret (Segredo do Consumidor)
-  // Setup → App Manager → Sua App → Chave e segredo do consumidor → Segredo do Consumidor
+  // Segredo do Consumidor — DEIXAR VAZIO (extensao e cliente publico, usa PKCE)
   clientSecret: '',
 
-  // URL de login (Sandbox) — test.salesforce.com para auth, My Domain para app
-  loginUrl: 'https://test.salesforce.com',
+  // URL de login (Producao My Domain)
+  loginUrl: 'https://cometa.my.salesforce.com',
 
-  // URL da org (Lightning)
-  orgUrl: 'https://cometa--crm.sandbox.lightning.force.com',
+  // URL da org Lightning (producao). Usado pra abrir registros no SF.
+  // Se for diferente, ajustar: tipicamente cometa.lightning.force.com
+  orgUrl: 'https://cometa.lightning.force.com',
 
   // API version
   apiVersion: 'v59.0',
@@ -56,8 +57,8 @@ const SF_CONFIG = {
   // refresh_token permite renovar o access_token sem novo login.
   scopes: 'api id chatter_api refresh_token',
 
-  // Redirect URI — a extensão Chrome usa chrome.identity
-  // O Salesforce precisa aceitar esse redirect
+  // Redirect URI — a extensao Chrome usa chrome.identity
+  // O Salesforce precisa aceitar esse redirect na Connected App de producao
   get redirectUri() {
     return chrome.identity.getRedirectURL('salesforce');
   },
