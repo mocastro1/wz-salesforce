@@ -1871,7 +1871,7 @@ async function handleAction(action, contact, conversation, panel) {
 
   // Validação client-side antes de enviar à API
   if (!confirmed.phone || confirmed.phone.replace(/\D/g, '').length < 8) {
-    setStatus(status, 'error', '❌ Telefone inválido ou não detectado. Corrija o número no modal.');
+    setStatus(status, 'error', 'Telefone inválido ou não detectado.');
     return;
   }
 
@@ -1898,7 +1898,7 @@ async function handleAction(action, contact, conversation, panel) {
     const result = await sendMessage({ action: msgAction, data: msgData });
 
     if (result?.ok) {
-      setStatus(status, 'success', '✅ Enviado com sucesso!');
+      setStatus(status, 'success', 'Lead criado com sucesso');
       // Refresh automático após criação de lead
       if (action === 'lead' && confirmed.phone) {
         lastLookupPhone = null;
@@ -1907,7 +1907,7 @@ async function handleAction(action, contact, conversation, panel) {
         setTimeout(() => lookupLeadByPhone(confirmed.phone), 1500);
       }
     } else if (result?.duplicate) {
-      setStatus(status, 'error', '⚠️ Já enviado nas últimas 24h');
+      setStatus(status, 'error', 'Já enviado nas últimas 24h');
       disableButtons(panel, false);
       const force = confirm('⚠️ Este registro já foi enviado nas últimas 24h.\n\nDeseja enviar novamente?');
       if (force) {
@@ -1915,16 +1915,16 @@ async function handleAction(action, contact, conversation, panel) {
         setStatus(status, 'loading', 'Reenviando...');
         const retry = await sendMessage({ action: msgAction + '_force', data: msgData });
         if (retry?.ok) {
-          setStatus(status, 'success', '✅ Reenviado!');
+          setStatus(status, 'success', 'Reenviado');
         } else {
-          setStatus(status, 'error', `❌ ${retry?.error || 'Erro'}`);
+          setStatus(status, 'error', retry?.error || 'Erro ao reenviar');
         }
       }
     } else {
-      setStatus(status, 'error', `❌ ${result?.error || 'Erro desconhecido'}`);
+      setStatus(status, 'error', result?.error || 'Erro desconhecido');
     }
   } catch (e) {
-    setStatus(status, 'error', `❌ ${e.message}`);
+    setStatus(status, 'error', e.message);
   } finally {
     disableButtons(panel, false);
     setTimeout(() => clearStatus(status), 6000);
@@ -2002,13 +2002,13 @@ async function handleRegisterConversation(panel, contact, conversation) {
   const hasOpp  = !!currentLeadInfo?.opportunity?.oppId;
 
   if (!hasLead && !hasOpp) {
-    setStatus(status, 'error', '❌ Nenhum Lead ou Oportunidade ativo para vincular a conversa.');
+    setStatus(status, 'error', 'Nenhum Lead/Oportunidade ativo para vincular');
     setTimeout(() => clearStatus(status), 4000);
     return;
   }
 
   if (!conversation || conversation.length === 0) {
-    setStatus(status, 'error', '❌ Nenhuma mensagem encontrada na conversa.');
+    setStatus(status, 'error', 'Nenhuma mensagem encontrada na conversa');
     setTimeout(() => clearStatus(status), 4000);
     return;
   }
@@ -2040,12 +2040,12 @@ async function handleRegisterConversation(panel, contact, conversation) {
     });
 
     if (resp?.ok) {
-      setStatus(status, 'success', `✅ Conversa registrada (${messages.length} msgs) — Activity History atualizado`);
+      setStatus(status, 'success', `Conversa registrada · ${messages.length} mensagens`);
     } else {
-      setStatus(status, 'error', `❌ ${resp?.error || 'Erro ao registrar conversa'}`);
+      setStatus(status, 'error', resp?.error || 'Erro ao registrar conversa');
     }
   } catch (e) {
-    setStatus(status, 'error', `❌ ${e.message}`);
+    setStatus(status, 'error', e.message);
   } finally {
     disableButtons(panel, false);
     setTimeout(() => clearStatus(status), 6000);
@@ -2062,7 +2062,7 @@ async function handleCreateReminder(panel, contact) {
   const hasOpp  = !!currentLeadInfo?.opportunity?.oppId;
 
   if (!hasLead && !hasOpp) {
-    setStatus(status, 'error', '❌ Nenhum Lead ou Oportunidade ativo para criar o lembrete.');
+    setStatus(status, 'error', 'Nenhum Lead/Oportunidade ativo para o lembrete');
     setTimeout(() => clearStatus(status), 4000);
     return;
   }
@@ -2092,12 +2092,12 @@ async function handleCreateReminder(panel, contact) {
 
     if (resp?.ok) {
       const [y, m, d] = result.date.split('-');
-      setStatus(status, 'success', `✅ Lembrete criado para ${d}/${m}/${y} às ${result.time}`);
+      setStatus(status, 'success', `Lembrete criado · ${d}/${m}/${y} às ${result.time}`);
     } else {
-      setStatus(status, 'error', `❌ ${resp?.error || 'Erro ao criar lembrete'}`);
+      setStatus(status, 'error', resp?.error || 'Erro ao criar lembrete');
     }
   } catch (e) {
-    setStatus(status, 'error', `❌ ${e.message}`);
+    setStatus(status, 'error', e.message);
   } finally {
     disableButtons(panel, false);
     setTimeout(() => clearStatus(status), 6000);
@@ -2126,37 +2126,39 @@ function showReminderModal(participantName) {
     const modal = document.createElement('div');
     modal.id = REMINDER_MODAL_ID;
     modal.innerHTML = `
-      <div class="wzsf-overlay" id="wzsf-rm-overlay">
-        <div class="wzsf-disqualify-box">
-          <div class="wzsf-disqualify-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-            🔔 Criar Lembrete
-          </div>
-          <div class="wzsf-disqualify-subtitle">Lembrete - ${escHtml(participantName)}</div>
-
-          <label class="wzsf-label">Data
-            <input type="date" id="wzsf-rm-date" class="wzsf-input" value="${todayStr}" min="${todayStr}">
-          </label>
-
-          <label class="wzsf-label">Hora
-            <div class="wzsf-custom-select" id="wzsf-rm-time-select" tabindex="0">
-              <div class="wzsf-custom-select__trigger" id="wzsf-rm-time-trigger">
-                <span id="wzsf-rm-time-label">09:00</span>
-                <svg class="wzsf-custom-select__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-              </div>
-              <div class="wzsf-custom-select__dropdown" id="wzsf-rm-time-dropdown">
-                ${timeSlots.map(t => `<div class="wzsf-custom-select__option ${t === '09:00' ? 'wzsf-custom-select__option--selected' : ''}" data-value="${t}">${t}</div>`).join('')}
-              </div>
+      <div class="wzsf-overlay" id="wzsf-rm-overlay" role="dialog" aria-modal="true" aria-labelledby="wzsf-rm-title">
+        <div class="wzsf-modal-box">
+          <div class="wzsf-modal-header">
+            <div class="wzsf-modal-icon wzsf-modal-icon--primary" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
             </div>
-          </label>
-
-          <label class="wzsf-label">Observação (opcional)
-            <input type="text" id="wzsf-rm-desc" class="wzsf-input" placeholder="Ex: retornar sobre proposta">
-          </label>
-
-          <div class="wzsf-modal-actions">
-            <button id="wzsf-rm-cancel" class="wzsf-btn-ghost">Cancelar</button>
-            <button id="wzsf-rm-confirm" class="wzsf-btn-primary">Criar Lembrete</button>
+            <div class="wzsf-modal-titles">
+              <h2 class="wzsf-modal-title" id="wzsf-rm-title">Criar lembrete</h2>
+              <div class="wzsf-modal-subtitle">Para ${escHtml(participantName)}.</div>
+            </div>
+          </div>
+          <div class="wzsf-modal-body">
+            <label class="wzsf-label">Data
+              <input type="date" id="wzsf-rm-date" class="wzsf-input" value="${todayStr}" min="${todayStr}">
+            </label>
+            <label class="wzsf-label">Hora
+              <div class="wzsf-custom-select" id="wzsf-rm-time-select" tabindex="0">
+                <div class="wzsf-custom-select__trigger" id="wzsf-rm-time-trigger">
+                  <span id="wzsf-rm-time-label">09:00</span>
+                  <svg class="wzsf-custom-select__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </div>
+                <div class="wzsf-custom-select__dropdown" id="wzsf-rm-time-dropdown">
+                  ${timeSlots.map(t => `<div class="wzsf-custom-select__option ${t === '09:00' ? 'wzsf-custom-select__option--selected' : ''}" data-value="${t}">${t}</div>`).join('')}
+                </div>
+              </div>
+            </label>
+            <label class="wzsf-label">Observação (opcional)
+              <input type="text" id="wzsf-rm-desc" class="wzsf-input" placeholder="Ex: retornar sobre proposta">
+            </label>
+          </div>
+          <div class="wzsf-modal-footer">
+            <button id="wzsf-rm-cancel" class="wzsf-btn-ghost" type="button">Cancelar</button>
+            <button id="wzsf-rm-confirm" class="wzsf-btn-primary" type="button">Criar lembrete</button>
           </div>
         </div>
       </div>
@@ -2164,14 +2166,16 @@ function showReminderModal(participantName) {
     document.body.appendChild(modal);
 
     let selectedTime = '09:00';
+    const trapRelease = trapFocus(modal);
 
     const cleanup = () => {
-      document.removeEventListener('keydown', escHandler);
+      document.removeEventListener('keydown', escHandler, true);
       document.removeEventListener('click', outsideClickHandler);
+      trapRelease?.();
       modal.remove();
     };
-    const escHandler = (e) => { if (e.key === 'Escape') { cleanup(); resolve(null); } };
-    document.addEventListener('keydown', escHandler);
+    const escHandler = (e) => { if (e.key === 'Escape') { e.stopPropagation(); cleanup(); resolve(null); } };
+    document.addEventListener('keydown', escHandler, true);
 
     // Custom-select da hora (mesmo padrão da desqualificação — imune ao tema do navegador)
     const timeSelect   = modal.querySelector('#wzsf-rm-time-select');
@@ -2231,7 +2235,7 @@ async function handleDisqualify(panel) {
   const hasOpportunity = !!currentLeadInfo?.opportunity?.oppId;
 
   if (!hasLead && !hasOpportunity) {
-    setStatus(status, 'error', '❌ Nenhum Lead ou Oportunidade encontrado para desqualificar.');
+    setStatus(status, 'error', 'Nenhum Lead/Oportunidade ativo para desqualificar');
     setTimeout(() => clearStatus(status), 4000);
     return;
   }
@@ -2256,7 +2260,7 @@ async function handleDisqualify(panel) {
     });
 
     if (resp?.ok) {
-      setStatus(status, 'success', `✅ ${objectType} desqualificado com sucesso!`);
+      setStatus(status, 'success', `${objectType} desqualificado`);
       // Atualiza o badge/lead info
       lastLookupPhone = null;
       currentLeadInfo = null;
@@ -2264,10 +2268,10 @@ async function handleDisqualify(panel) {
       const contact = extractContactInfo();
       if (contact.phone) setTimeout(() => lookupLeadByPhone(contact.phone), 1500);
     } else {
-      setStatus(status, 'error', `❌ ${resp?.error || 'Erro ao desqualificar'}`);
+      setStatus(status, 'error', resp?.error || 'Erro ao desqualificar');
     }
   } catch (e) {
-    setStatus(status, 'error', `❌ ${e.message}`);
+    setStatus(status, 'error', e.message);
   } finally {
     disableButtons(panel, false);
     setTimeout(() => clearStatus(status), 7000);
@@ -2282,8 +2286,16 @@ function showDisqualifyModal(objectType, recordId) {
     let selectedMotivo = '';
 
     const titleMap = {
-      Lead:        { icon: '👤', label: 'Desqualificar Lead',        subtitle: 'Status → "Não qualificado"' },
-      Opportunity: { icon: '💼', label: 'Desqualificar Oportunidade', subtitle: 'Etapa → "Negociação perdida"' },
+      Lead: {
+        title: 'Desqualificar lead',
+        subtitleHtml: 'Status será alterado para <code>Não qualificado</code>.',
+        confirmLabel: 'Desqualificar lead',
+      },
+      Opportunity: {
+        title: 'Desqualificar oportunidade',
+        subtitleHtml: 'Etapa será alterada para <code>Negociação perdida</code>.',
+        confirmLabel: 'Desqualificar oportunidade',
+      },
     };
     const ui = titleMap[objectType] || titleMap.Lead;
 
@@ -2291,35 +2303,44 @@ function showDisqualifyModal(objectType, recordId) {
     const modal = document.createElement('div');
     modal.id = DISQUALIFY_MODAL_ID;
     modal.innerHTML = `
-      <div class="wzsf-overlay" id="wzsf-dq-overlay">
+      <div class="wzsf-overlay" id="wzsf-dq-overlay" role="dialog" aria-modal="true" aria-labelledby="wzsf-dq-title">
         <div class="wzsf-disqualify-box">
-          <div class="wzsf-disqualify-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-            ${ui.icon} ${ui.label}
+          <div class="wzsf-modal-header">
+            <div class="wzsf-modal-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </div>
+            <div class="wzsf-modal-titles">
+              <h2 class="wzsf-modal-title" id="wzsf-dq-title">${ui.title}</h2>
+              <div class="wzsf-modal-subtitle">${ui.subtitleHtml}</div>
+            </div>
           </div>
-          <div class="wzsf-disqualify-subtitle">${ui.subtitle}</div>
-
-          <div id="wzsf-dq-body">
-            <div class="wzsf-disqualify-loading">⏳ Carregando motivos...</div>
+          <div class="wzsf-modal-body">
+            <div id="wzsf-dq-body">
+              <div class="wzsf-disqualify-loading">
+                <span class="wzsf-loading-spinner" aria-hidden="true"></span>
+                Carregando motivos...
+              </div>
+            </div>
           </div>
-
-          <div class="wzsf-modal-actions">
-            <button id="wzsf-dq-cancel" class="wzsf-btn-ghost">Cancelar</button>
-            <button id="wzsf-dq-confirm" class="wzsf-btn-danger" disabled>Confirmar</button>
+          <div class="wzsf-modal-footer">
+            <button id="wzsf-dq-cancel" class="wzsf-btn-ghost" type="button">Cancelar</button>
+            <button id="wzsf-dq-confirm" class="wzsf-btn-danger" type="button" disabled>${ui.confirmLabel}</button>
           </div>
         </div>
       </div>
     `;
     document.body.appendChild(modal);
+    const trapRelease = trapFocus(modal);
 
     // Fecha o modal e remove TODOS os listeners de document (evita vazamento)
     const cleanup = () => {
-      document.removeEventListener('keydown', escHandler);
+      document.removeEventListener('keydown', escHandler, true);
       document.removeEventListener('click', outsideClickHandler);
+      trapRelease?.();
       modal.remove();
     };
     const escHandler = (e) => {
-      if (e.key === 'Escape') { cleanup(); resolve(null); }
+      if (e.key === 'Escape') { e.stopPropagation(); cleanup(); resolve(null); }
     };
     // Placeholder — só é usado depois que o select é renderizado
     let outsideClickHandler = () => {};
@@ -2357,11 +2378,11 @@ function showDisqualifyModal(objectType, recordId) {
             Motivo de Perda
             <div class="wzsf-custom-select" id="wzsf-dq-select" tabindex="0">
               <div class="wzsf-custom-select__trigger" id="wzsf-dq-trigger">
-                <span id="wzsf-dq-label">-- Selecione --</span>
+                <span id="wzsf-dq-label">Selecione um motivo...</span>
                 <svg class="wzsf-custom-select__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
               </div>
               <div class="wzsf-custom-select__dropdown" id="wzsf-dq-dropdown">
-                <div class="wzsf-custom-select__option wzsf-custom-select__option--placeholder" data-value="">-- Selecione --</div>
+                <div class="wzsf-custom-select__option wzsf-custom-select__option--placeholder" data-value="">Selecione um motivo...</div>
                 ${values.map(v => `<div class="wzsf-custom-select__option" data-value="${escHtml(v.value)}">${escHtml(v.label)}</div>`).join('')}
               </div>
             </div>
@@ -2403,7 +2424,7 @@ function showDisqualifyModal(objectType, recordId) {
 
       } else {
         const msg = resp?.error || `Nenhum motivo encontrado para ${objectType}`;
-        body.innerHTML = `<div class="wzsf-disqualify-error">⚠️ ${escHtml(msg)}</div>`;
+        body.innerHTML = `<div class="wzsf-disqualify-error">${escHtml(msg)}</div>`;
       }
 
     } catch (e) {
@@ -2435,34 +2456,61 @@ function showConfirmModal(contact, action) {
         Interesse em
         <div class="wzsf-custom-select" id="wzsf-custom-select" tabindex="0">
           <div class="wzsf-custom-select__trigger" id="wzsf-select-trigger">
-            <span id="wzsf-select-label">-- Selecione --</span>
+            <span id="wzsf-select-label">Selecione um produto...</span>
             <svg class="wzsf-custom-select__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
           <div class="wzsf-custom-select__dropdown" id="wzsf-select-dropdown">
-            <div class="wzsf-custom-select__option wzsf-custom-select__option--placeholder" data-value="">-- Selecione --</div>
+            <div class="wzsf-custom-select__option wzsf-custom-select__option--placeholder" data-value="">Selecione um produto...</div>
             ${interestOptions.map(v => `<div class="wzsf-custom-select__option" data-value="${escHtml(v.value)}">${escHtml(v.label)}</div>`).join('')}
           </div>
         </div>
       </label>` : '';
 
+    // Ícone e título por ação
+    const headerMap = {
+      lead: {
+        iconClass: 'wzsf-modal-icon--primary',
+        iconSvg: '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>',
+        title: 'Criar lead',
+        subtitle: 'Confirme os dados do contato.',
+        confirmLabel: 'Confirmar',
+      },
+      conversation: {
+        iconClass: '',
+        iconSvg: '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+        title: 'Registrar contato',
+        subtitle: 'Confirme os dados do contato.',
+        confirmLabel: 'Registrar',
+      },
+    };
+    const head = headerMap[action] || headerMap.lead;
+
     const modal = document.createElement('div');
     modal.id = MODAL_ID;
     modal.innerHTML = `
-      <div class="wzsf-overlay">
+      <div class="wzsf-overlay" role="dialog" aria-modal="true" aria-labelledby="wzsf-confirm-title">
         <div class="wzsf-modal-box">
-          <div class="wzsf-modal-title">Confirmar contato</div>
-          <label class="wzsf-label">
-            Nome
-            <input id="wzsf-inp-name" type="text" value="${escHtml(contact.name)}" placeholder="Nome do contato" />
-          </label>
-          <label class="wzsf-label">
-            Telefone
-            <input id="wzsf-inp-phone" type="text" value="${escHtml(contact.phone)}" placeholder="Ex: 5511999999999" />
-          </label>
-          ${interestHtml}
-          <div class="wzsf-modal-actions">
-            <button id="wzsf-cancel" class="wzsf-btn-ghost">Cancelar</button>
-            <button id="wzsf-confirm" class="wzsf-btn-primary">Confirmar</button>
+          <div class="wzsf-modal-header">
+            <div class="wzsf-modal-icon ${head.iconClass}" aria-hidden="true">${head.iconSvg}</div>
+            <div class="wzsf-modal-titles">
+              <h2 class="wzsf-modal-title" id="wzsf-confirm-title">${head.title}</h2>
+              <div class="wzsf-modal-subtitle">${head.subtitle}</div>
+            </div>
+          </div>
+          <div class="wzsf-modal-body">
+            <label class="wzsf-label">
+              Nome
+              <input id="wzsf-inp-name" type="text" value="${escHtml(contact.name)}" placeholder="Nome do contato" autocomplete="off" />
+            </label>
+            <label class="wzsf-label">
+              Telefone
+              <input id="wzsf-inp-phone" type="text" value="${escHtml(contact.phone)}" placeholder="Ex: 5511999999999" readonly />
+            </label>
+            ${interestHtml}
+          </div>
+          <div class="wzsf-modal-footer">
+            <button id="wzsf-cancel" class="wzsf-btn-ghost" type="button">Cancelar</button>
+            <button id="wzsf-confirm" class="wzsf-btn-primary" type="button">${head.confirmLabel}</button>
           </div>
         </div>
       </div>
@@ -2515,6 +2563,7 @@ function showConfirmModal(contact, action) {
       if (outsideClickHandler) {
         document.removeEventListener('click', outsideClickHandler, { capture: true });
       }
+      modal.__cleanupHooks?.();
       modal.remove();
     };
 
@@ -2524,8 +2573,16 @@ function showConfirmModal(contact, action) {
     modal.querySelector('.wzsf-overlay').addEventListener('click', (e) => {
       if (e.target === e.currentTarget) { cleanup(); resolve(null); }
     });
-    modal.querySelector('#wzsf-confirm').addEventListener('click', () => {
-      const name  = modal.querySelector('#wzsf-inp-name').value.trim();
+    const confirmBtn = modal.querySelector('#wzsf-confirm');
+    const nameInput  = modal.querySelector('#wzsf-inp-name');
+
+    // Habilita Confirmar só quando há nome
+    const syncEnabled = () => { confirmBtn.disabled = !nameInput.value.trim(); };
+    nameInput.addEventListener('input', syncEnabled);
+    syncEnabled();
+
+    confirmBtn.addEventListener('click', () => {
+      const name  = nameInput.value.trim();
       const phone = modal.querySelector('#wzsf-inp-phone').value.trim().replace(/\D/g, '');
       const customSel = modal.querySelector('#wzsf-custom-select');
       const interesse = customSel ? (customSel._getValue?.() || '') : '';
@@ -2533,9 +2590,38 @@ function showConfirmModal(contact, action) {
       resolve({ name, phone, interesse: interesse || undefined });
     });
 
-    // Foco no campo de nome
-    setTimeout(() => modal.querySelector('#wzsf-inp-name')?.focus(), 50);
+    // Esc fecha + focus trap
+    const escHandler = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); cleanup(); resolve(null); }
+    };
+    document.addEventListener('keydown', escHandler, true);
+    const trapRelease = trapFocus(modal);
+    modal.__cleanupHooks = () => {
+      document.removeEventListener('keydown', escHandler, true);
+      trapRelease?.();
+    };
+
+    setTimeout(() => nameInput?.focus(), 50);
   });
+}
+
+// ─── Focus trap: mantém o tab dentro do modal ─────────────────
+function trapFocus(modal) {
+  const focusable = 'button:not([disabled]), [href], input:not([disabled]):not([readonly]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const handler = (e) => {
+    if (e.key !== 'Tab') return;
+    const items = modal.querySelectorAll(focusable);
+    if (items.length === 0) return;
+    const first = items[0];
+    const last  = items[items.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  };
+  document.addEventListener('keydown', handler, true);
+  return () => document.removeEventListener('keydown', handler, true);
 }
 
 function escHtml(str) {
