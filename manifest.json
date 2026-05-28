@@ -31,7 +31,6 @@
     }
   ],
   "action": {
-    "default_title": "WZ → Salesforce",
-    "default_popup": "popup.html"
+    "default_title": "WZ → Salesforce — Abrir WhatsApp Web"
   }
 }

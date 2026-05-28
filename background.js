@@ -5,6 +5,18 @@
 
 importScripts('config.js', 'auth.js');
 
+// ─── Clique no ícone da extensão → abre/foca WhatsApp Web ────
+chrome.action.onClicked.addListener(async () => {
+  const url = 'https://web.whatsapp.com/';
+  const tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+  if (tabs.length > 0) {
+    await chrome.tabs.update(tabs[0].id, { active: true });
+    if (tabs[0].windowId) await chrome.windows.update(tabs[0].windowId, { focused: true });
+  } else {
+    await chrome.tabs.create({ url });
+  }
+});
+
 // ─── Cache local (evita duplicatas em 24h) ───────────────────
 const CACHE_KEY = 'wzsf_sent_cache';
 const CACHE_TTL = 24 * 60 * 60 * 1000;
