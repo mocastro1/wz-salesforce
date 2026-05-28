@@ -5,7 +5,51 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.6.0';
+const VERSION  = 'v2.7.0';
+
+// ─── UI helpers ──────────────────────────────────────────────
+// Formata telefone BR para exibição: +55 65 9 9640-2200 / +55 65 9640-2200.
+// Fallback: prefixa "+" nos dígitos.
+function formatPhoneDisplay(raw) {
+  if (raw === null || raw === undefined) return '';
+  const digits = String(raw).replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 13 && digits.startsWith('55')) {
+    return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 5)} ${digits.slice(5, 9)}-${digits.slice(9)}`;
+  }
+  if (digits.length === 12 && digits.startsWith('55')) {
+    return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 8)}-${digits.slice(8)}`;
+  }
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `+${digits}`;
+}
+
+// Iniciais (até 2 caracteres maiúsculos) a partir do nome.
+function getInitials(name) {
+  if (!name) return '—';
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '—';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Aplica nome, iniciais e telefone formatado no card do painel de uma só vez.
+function setContactDisplay(panel, name, phoneDigits) {
+  if (!panel) return;
+  const nameEl = panel.querySelector('.wzsf-contact-name');
+  const phoneEl = panel.querySelector('.wzsf-contact-phone');
+  const initialsEl = panel.querySelector('.wzsf-avatar-initials');
+  if (nameEl) nameEl.textContent = name || 'Aguardando contato...';
+  if (phoneEl) {
+    phoneEl.textContent = phoneDigits ? formatPhoneDisplay(phoneDigits) : '—';
+  }
+  if (initialsEl) initialsEl.textContent = name ? getInitials(name) : '—';
+}
 let debounceTimer = null;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
@@ -234,12 +278,12 @@ function updateSfAuthIndicator() {
 
   if (sfAuthenticated) {
     dot.className = 'wzsf-sf-auth-dot wzsf-dot-online';
-    text.textContent = sfUserName || 'SF Conectado';
+    text.textContent = sfUserName || 'Salesforce conectado';
     if (loginBtn) loginBtn.style.display = 'none';
     if (logoutBtn) logoutBtn.style.display = '';
   } else {
     dot.className = 'wzsf-sf-auth-dot wzsf-dot-offline';
-    text.textContent = 'SF Desconectado';
+    text.textContent = 'Salesforce desconectado';
     if (loginBtn) loginBtn.style.display = '';
     if (logoutBtn) logoutBtn.style.display = 'none';
   }
@@ -250,7 +294,8 @@ function triggerSfLogin() {
   const loginBtn = panel?.querySelector('#wzsf-sf-login');
   if (loginBtn) {
     loginBtn.disabled = true;
-    loginBtn.textContent = '⏳ Conectando...';
+    const t = loginBtn.querySelector('.wzsf-btn-text');
+    if (t) t.textContent = 'Conectando...';
   }
   // Fire-and-forget: o OAuth abre uma aba e pode demorar > 30s.
   // O service worker MV3 pode ser suspendido nesse meio-tempo, fechando o canal
@@ -281,7 +326,8 @@ function triggerSfLogin() {
         clearInterval(pollInterval);
         if (loginBtn) {
           loginBtn.disabled = false;
-          loginBtn.textContent = '🔐 Login SF';
+          const t = loginBtn.querySelector('.wzsf-btn-text');
+          if (t) t.textContent = 'Entrar';
         }
         checkSfAuthStatus();
         updatePanel();
@@ -289,7 +335,8 @@ function triggerSfLogin() {
         clearInterval(pollInterval);
         if (loginBtn) {
           loginBtn.disabled = false;
-          loginBtn.textContent = '🔐 Login SF';
+          const t = loginBtn.querySelector('.wzsf-btn-text');
+          if (t) t.textContent = 'Entrar';
         }
       }
     });
@@ -1381,7 +1428,7 @@ function updatePanel() {
   }
 
   if (!isConversationOpen()) {
-    panel.querySelector('.wzsf-contact-name').textContent = 'Aguardando...';
+    setContactDisplay(panel, 'Aguardando contato...', null);
     panel.querySelector('.wzsf-contact-phone').textContent = 'Abra uma conversa no WhatsApp';
     panel.querySelectorAll('[data-action]').forEach(b => {
       b.disabled = true;
@@ -1409,10 +1456,9 @@ function updatePanel() {
   if (isGroup) {
     const nameEl = queryFirst(SEL.contactTitle);
     const groupName = nameEl?.getAttribute('title') || nameEl?.textContent?.trim() || 'Grupo';
-    panel.querySelector('.wzsf-contact-name').textContent = groupName;
-    panel.querySelector('.wzsf-contact-phone').textContent = '👥 Grupo — sem envio';
-    panel.querySelector('.wzsf-status').textContent = '';
-    panel.querySelector('.wzsf-status').className = 'wzsf-status';
+    setContactDisplay(panel, groupName, null);
+    panel.querySelector('.wzsf-contact-phone').textContent = 'Grupo — sem envio';
+    setStatus(panel.querySelector('.wzsf-status'), 'idle', 'Grupo não suportado');
     lastConversationKey = 'group_' + groupName;
     return;
   }
@@ -1426,10 +1472,11 @@ function updatePanel() {
   // Detecta mudança real de conversa (nome diferente)
   if (conversationKey !== lastConversationKey) {
     lastConversationKey = conversationKey;
-    panel.querySelector('.wzsf-contact-name').textContent  = contact.name  || 'Contato';
-    panel.querySelector('.wzsf-contact-phone').textContent = contact.phone ? `+${contact.phone}` : 'Número não detectado';
-    panel.querySelector('.wzsf-status').textContent = '';
-    panel.querySelector('.wzsf-status').className = 'wzsf-status';
+    setContactDisplay(panel, contact.name || 'Contato', contact.phone);
+    if (!contact.phone) {
+      panel.querySelector('.wzsf-contact-phone').textContent = 'Aguardando número...';
+    }
+    clearStatus(panel.querySelector('.wzsf-status'));
     // Limpa dados do contato anterior imediatamente
     currentLeadInfo = null;
     lastLookupPhone = null;
@@ -1440,9 +1487,9 @@ function updatePanel() {
       drawerAttempted.clear();
     }
     console.log(`[WZ-SF ${VERSION}] 📞 Conversa mudou para: ${contact.name} | ${contact.phone || '(sem phone ainda)'}`);
-  } else if (contact.phone && panel.querySelector('.wzsf-contact-phone').textContent !== `+${contact.phone}`) {
+  } else if (contact.phone && panel.querySelector('.wzsf-contact-phone').textContent !== formatPhoneDisplay(contact.phone)) {
     // Mesmo contato mas o phone agora apareceu (vindo do drawer ou atualização do WA)
-    panel.querySelector('.wzsf-contact-phone').textContent = `+${contact.phone}`;
+    panel.querySelector('.wzsf-contact-phone').textContent = formatPhoneDisplay(contact.phone);
   }
 
   // Se não há telefone mas temos nome, tenta abrir o drawer (uma vez) para capturar.
@@ -1455,7 +1502,7 @@ function updatePanel() {
     const cached = getDrawerCachedPhone(contact.name);
     if (cached) {
       contact.phone = cached;
-      panel.querySelector('.wzsf-contact-phone').textContent = `+${contact.phone}`;
+      panel.querySelector('.wzsf-contact-phone').textContent = formatPhoneDisplay(contact.phone);
       console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${contact.phone} (cache drawer)`);
     } else if (!drawerOpenInProgress && !drawerAttempted.has(conversationKey)) {
       // Marca ANTES de chamar — se falhar, não tenta de novo nesta conversa
@@ -1468,7 +1515,7 @@ function updatePanel() {
         const stillSameContact = lastConversationKey === contact.name;
         if (stillSameContact) {
           const phoneEl = panel.querySelector('.wzsf-contact-phone');
-          if (phoneEl) phoneEl.textContent = `+${phone}`;
+          if (phoneEl) phoneEl.textContent = formatPhoneDisplay(phone);
           console.log(`[WZ-SF ${VERSION}] 📞 ${contact.name} | ${phone} (auto-drawer) — disparando lookup`);
           // Único ponto de disparo de lookup do drawer
           if (sfAuthenticated) {
@@ -1512,12 +1559,13 @@ function updatePanel() {
 function createPanel() {
   const panel = document.createElement('div');
   panel.id = PANEL_ID;
+  const MOD = navigator.platform.toUpperCase().includes('MAC') ? '⌘' : 'Ctrl';
   panel.innerHTML = `
     <!-- HEADER -->
     <div class="wzsf-header">
       <div class="wzsf-header-left">
-        <div class="wzsf-logo">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <div class="wzsf-logo" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         </div>
         <div>
           <span class="wzsf-title">SF Sync</span>
@@ -1525,79 +1573,88 @@ function createPanel() {
         </div>
       </div>
       <div class="wzsf-header-actions">
-        <button class="wzsf-btn-header" id="wzsf-minimize" title="Minimizar">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+        <button class="wzsf-btn-header" id="wzsf-minimize" aria-label="Minimizar" title="Minimizar">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
         </button>
-        <button class="wzsf-btn-header" id="wzsf-close" title="Fechar">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        <button class="wzsf-btn-header" id="wzsf-close" aria-label="Fechar" title="Fechar (Esc)">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
     </div>
-
-
 
     <!-- CONTENT -->
     <div class="wzsf-content">
       <div class="wzsf-tab-content">
         <div class="wzsf-sf-auth">
           <div class="wzsf-sf-auth-status">
-            <span class="wzsf-sf-auth-dot wzsf-dot-offline"></span>
-            <span class="wzsf-sf-auth-text">SF Desconectado</span>
+            <span class="wzsf-sf-auth-dot wzsf-dot-offline" aria-hidden="true"></span>
+            <span class="wzsf-sf-auth-text">Salesforce desconectado</span>
           </div>
-          <button id="wzsf-sf-login" class="wzsf-sf-login-btn" title="Login Salesforce">🔐 Login SF</button>
-          <button id="wzsf-sf-logout" class="wzsf-sf-logout-btn" title="Sair do Salesforce" style="display:none;">🚪 Sair</button>
+          <button id="wzsf-sf-login" class="wzsf-sf-login-btn" title="Entrar no Salesforce">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            <span class="wzsf-btn-text">Entrar</span>
+          </button>
+          <button id="wzsf-sf-logout" class="wzsf-sf-logout-btn" title="Sair do Salesforce" style="display:none;">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <span class="wzsf-btn-text">Sair</span>
+          </button>
         </div>
 
         <!-- Card Contato -->
         <div class="wzsf-card">
-          <div class="wzsf-avatar">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <div class="wzsf-avatar" aria-hidden="true">
+            <span class="wzsf-avatar-initials">—</span>
           </div>
           <div class="wzsf-contact-info">
-            <div class="wzsf-contact-name">Contato</div>
+            <div class="wzsf-contact-name">Aguardando contato...</div>
             <div class="wzsf-contact-phone">—</div>
           </div>
-          <button class="wzsf-btn-chevron" id="wzsf-refresh" title="Atualizar status do Lead/Oportunidade">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          <button class="wzsf-btn-chevron" id="wzsf-refresh" aria-label="Atualizar status" title="Atualizar status do Lead/Oportunidade">
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
           </button>
         </div>
 
         <!-- Ações -->
         <div class="wzsf-actions">
-          <button class="wzsf-btn-primary" data-action="lead">
-            <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
-            Criar Lead
+          <button class="wzsf-btn-primary" data-action="lead" data-shortcut="lead">
+            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></span>
+            <span class="wzsf-btn-label">Criar lead</span>
+            <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${MOD}</span><span class="wzsf-kbd">L</span></span>
           </button>
-          <button class="wzsf-btn-secondary" data-action="conversation">
-            <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
-            Registrar Contato
+          <button class="wzsf-btn-secondary" data-action="conversation" data-shortcut="conversation">
+            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+            <span class="wzsf-btn-label">Registrar contato</span>
+            <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${MOD}</span><span class="wzsf-kbd">R</span></span>
           </button>
-          <button class="wzsf-btn-secondary" data-action="activity">
-            <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>
-            Criar Lembrete
+          <button class="wzsf-btn-secondary" data-action="activity" data-shortcut="activity">
+            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span>
+            <span class="wzsf-btn-label">Criar lembrete</span>
+            <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">${MOD}</span><span class="wzsf-kbd">D</span></span>
           </button>
           <button class="wzsf-btn-ghost" data-action="open">
-            <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
-            Abrir no Salesforce
+            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
+            <span class="wzsf-btn-label">Abrir no Salesforce</span>
           </button>
-          <button class="wzsf-btn-danger" data-action="disqualify" id="wzsf-btn-disqualify" disabled>
-            <span class="wzsf-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>
-            Desqualificar
+          <div class="wzsf-actions-divider" role="separator"></div>
+          <button class="wzsf-btn-danger" data-action="disqualify" data-shortcut="disqualify" id="wzsf-btn-disqualify" disabled>
+            <span class="wzsf-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>
+            <span class="wzsf-btn-label">Desqualificar lead</span>
+            <span class="wzsf-kbd-group" aria-hidden="true"><span class="wzsf-kbd">⇧</span><span class="wzsf-kbd">X</span></span>
           </button>
         </div>
-
-        <!-- Status -->
-        <div class="wzsf-status"></div>
       </div>
-
-
     </div>
 
-    <!-- FOOTER -->
-    <div class="wzsf-footer">
-      <span class="wzsf-footer-text">Pressione</span>
-      <span class="wzsf-kbd">Esc</span>
-      <span class="wzsf-footer-text">para fechar</span>
+    <!-- STATUS BAR (rodapé persistente) -->
+    <div class="wzsf-status">
+      <div class="wzsf-status-left">
+        <span class="wzsf-status-dot loading" aria-hidden="true"></span>
+        <span class="wzsf-status-text">Conectando...</span>
+      </div>
+      <div class="wzsf-status-hint">
+        <span class="wzsf-kbd">Esc</span>
+        <span>fechar</span>
+      </div>
     </div>
   `;
 
@@ -1633,10 +1690,11 @@ function createPanel() {
   if (sfLogoutBtn) {
     sfLogoutBtn.addEventListener('click', () => {
       sfLogoutBtn.disabled = true;
-      sfLogoutBtn.textContent = '⏳ Saindo...';
+      const lt = sfLogoutBtn.querySelector('.wzsf-btn-text');
+      if (lt) lt.textContent = 'Saindo...';
       chrome.runtime.sendMessage({ action: 'sfLogout' }, (resp) => {
         sfLogoutBtn.disabled = false;
-        sfLogoutBtn.textContent = '🚪 Sair';
+        if (lt) lt.textContent = 'Sair';
         if (chrome.runtime.lastError) return;
         sfAuthenticated = false;
         sfUserName = '';
@@ -1677,7 +1735,56 @@ function createPanel() {
     });
   });
 
+  // ─── Atalhos de teclado ────────────────────────────────────
+  // Disparam os botões correspondentes. Ignorados quando há modal aberto,
+  // o painel está oculto, ou o foco está em input/textarea/contenteditable.
+  setupPanelShortcuts(panel);
+
   return panel;
+}
+
+function setupPanelShortcuts(panel) {
+  if (window.__wzsfShortcutsBound) return;
+  window.__wzsfShortcutsBound = true;
+
+  document.addEventListener('keydown', (e) => {
+    // Ignora se o painel está escondido ou se há um modal aberto
+    if (panel.classList.contains('wzsf-hidden')) return;
+    if (document.querySelector('.wzsf-overlay')) return;
+
+    // Ignora se o usuário está digitando em outro lugar
+    const target = e.target;
+    if (target) {
+      const tag = (target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target.isContentEditable) return;
+    }
+
+    // Esc fecha o painel (e mostra o FAB)
+    if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      panel.classList.add('wzsf-hidden');
+      const fab = document.getElementById('wzsf-fab');
+      fab?.classList.remove('wzsf-hidden');
+      return;
+    }
+
+    const mod = e.metaKey || e.ctrlKey;
+    let action = null;
+    if (mod && e.key.toLowerCase() === 'l') action = 'lead';
+    else if (mod && e.key.toLowerCase() === 'r') action = 'conversation';
+    else if (mod && e.key.toLowerCase() === 'd') action = 'activity';
+    else if (e.shiftKey && !mod && e.key.toLowerCase() === 'x') action = 'disqualify';
+
+    if (action) {
+      const btn = panel.querySelector(`[data-action="${action}"]`);
+      if (btn && !btn.disabled) {
+        e.preventDefault();
+        e.stopPropagation();
+        btn.click();
+      }
+    }
+  }, true);
 }
 
 // ─── FAB (Floating Action Button) ──────────────────────────────
@@ -1769,7 +1876,7 @@ async function handleAction(action, contact, conversation, panel) {
   }
 
   disableButtons(panel, true);
-  setStatus(status, 'loading', '⏳ Enviando ao Salesforce...');
+  setStatus(status, 'loading', 'Enviando ao Salesforce...');
 
   try {
     let msgAction, msgData;
@@ -1805,7 +1912,7 @@ async function handleAction(action, contact, conversation, panel) {
       const force = confirm('⚠️ Este registro já foi enviado nas últimas 24h.\n\nDeseja enviar novamente?');
       if (force) {
         disableButtons(panel, true);
-        setStatus(status, 'loading', '⏳ Reenviando...');
+        setStatus(status, 'loading', 'Reenviando...');
         const retry = await sendMessage({ action: msgAction + '_force', data: msgData });
         if (retry?.ok) {
           setStatus(status, 'success', '✅ Reenviado!');
@@ -1847,13 +1954,26 @@ function sendMessage(msg) {
   });
 }
 
+// Status bar estruturado: atualiza dot + texto, mantém rodapé persistente.
+// type: 'loading' | 'success' | 'error' | 'idle'
 function setStatus(el, type, msg) {
-  el.className = `wzsf-status wzsf-status-${type}`;
-  el.textContent = msg;
+  if (!el) return;
+  const textEl = el.querySelector('.wzsf-status-text');
+  const dotEl  = el.querySelector('.wzsf-status-dot');
+  if (!textEl || !dotEl) {
+    el.textContent = msg || '';
+    return;
+  }
+  const dotClass = type === 'error' ? 'error'
+                 : type === 'loading' ? 'loading'
+                 : type === 'idle' ? 'offline'
+                 : 'online';
+  dotEl.className = `wzsf-status-dot ${dotClass}`;
+  textEl.className = type && type !== 'idle' ? `wzsf-status-text wzsf-status-${type}` : 'wzsf-status-text';
+  textEl.textContent = msg || '';
 }
 function clearStatus(el) {
-  el.className = 'wzsf-status';
-  el.textContent = '';
+  setStatus(el, 'success', 'Sincronizado');
 }
 function disableButtons(panel, disable) {
   panel.querySelectorAll('[data-action]').forEach(b => b.disabled = disable);
@@ -1905,7 +2025,7 @@ async function handleRegisterConversation(panel, contact, conversation) {
   }));
 
   disableButtons(panel, true);
-  setStatus(status, 'loading', `⏳ Registrando conversa no ${recordType}...`);
+  setStatus(status, 'loading', `Registrando conversa no ${recordType}...`);
 
   try {
     const resp = await sendMessage({
@@ -1955,7 +2075,7 @@ async function handleCreateReminder(panel, contact) {
   if (!result) return; // cancelado
 
   disableButtons(panel, true);
-  setStatus(status, 'loading', '⏳ Criando lembrete...');
+  setStatus(status, 'loading', 'Criando lembrete...');
 
   try {
     const resp = await sendMessage({
@@ -2127,7 +2247,7 @@ async function handleDisqualify(panel) {
   const motivoDePerda = result.motivoDePerda;
 
   disableButtons(panel, true);
-  setStatus(status, 'loading', `⏳ Desqualificando ${objectType}...`);
+  setStatus(status, 'loading', `Desqualificando ${objectType}...`);
 
   try {
     const resp = await sendMessage({
