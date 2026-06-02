@@ -4,11 +4,11 @@
 
 const API_CONFIG = {
   // URL de producao
-  baseUrl: 'https://wz-api.grupocometa.com.br',
+  baseUrl: 'https://wzapi.viacometa.com.br',
 
   // Bearer token compartilhado com o wz-api (campo API_BEARER_TOKEN no .env)
   // ATENCAO: precisa ser identico ao token gerado pelo deploy.sh no servidor
-  apiToken: 'COLAR_AQUI_O_TOKEN_GERADO_PELO_DEPLOY_SH',
+  apiToken: '8CTmbtzOMXbts3j6Cn6yWpgMFjDWWRob',
 
   endpoints: {
     saveLead:             '/api/leads',

@@ -5,7 +5,7 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.7.0';
+const VERSION  = 'v2.7.7';
 
 // ─── UI helpers ──────────────────────────────────────────────
 // Formata telefone BR para exibição: +55 65 9 9640-2200 / +55 65 9640-2200.
@@ -27,6 +27,30 @@ function formatPhoneDisplay(raw) {
     return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   }
   return `+${digits}`;
+}
+
+// Normaliza um telefone BR para dígitos (55 + DDD + número).
+function normalizePhoneBR(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 13 && digits.startsWith('55')) return digits; // 55 + DDD + 9 + 8
+  if (digits.length === 12 && digits.startsWith('55')) return digits; // 55 + DDD + 8
+  if (digits.length === 11) return '55' + digits;                     // DDD + 9 + 8
+  if (digits.length === 10) return '55' + digits;                     // DDD + 8
+  return digits;
+}
+
+// Valida se o texto é um telefone BR plausível. É a defesa principal do fallback
+// por texto (Waspeed): rejeita números de mensagem que não têm cara de telefone BR.
+// Aceita só: 55 + DDD válido (11..99) + 8 ou 9 dígitos locais.
+//   "+55 65 9964-5169" → 556599645169 (DDD 65) ✅
+//   "0380987 4140"     → DDD "03" inválido ❌
+//   "+150200300"       → curto demais ❌
+function isPlausibleBrPhone(raw) {
+  const n = normalizePhoneBR(raw);
+  if (n.length !== 12 && n.length !== 13) return false;
+  if (!n.startsWith('55')) return false;
+  const ddd = parseInt(n.slice(2, 4), 10);
+  return ddd >= 11 && ddd <= 99;
 }
 
 // Iniciais (até 2 caracteres maiúsculos) a partir do nome.
@@ -51,6 +75,12 @@ function setContactDisplay(panel, name, phoneDigits) {
   if (initialsEl) initialsEl.textContent = name ? getInitials(name) : '—';
 }
 let debounceTimer = null;
+// IDs dos timers globais — guardados para poder desligá-los caso o contexto da
+// extensão seja invalidado (auto-update do Chrome), evitando timers/observers órfãos.
+let connCheckInterval = null;
+let authCheckInterval = null;
+let heartbeatInterval = null;
+let extensionInvalidated = false;
 let lastConversationKey = null;
 let storeData = { phone: '', name: '', pushname: '', source: 'none' };
 let webhookOnline = false;
@@ -61,6 +91,11 @@ let sellerPhone = ''; // Telefone do vendedor logado no WhatsApp
 let currentLeadInfo = null;  // Dados do Lead encontrado no SF
 let lookupInProgress = false; // Evita piscar durante a busca
 let lastLookupPhone = null;  // Último telefone pesquisado (evita re-busca desnecessária)
+// Cache de resultado por telefone, com validade (TTL). Ao navegar entre conversas,
+// voltar pra um contato visto há pouco não re-consulta o Salesforce — principal
+// ganho de velocidade ao trocar de contato. O botão Atualizar (force) ignora o cache.
+const LOOKUP_TTL_MS = 2 * 60 * 1000; // 2 minutos
+const lookupCache = new Map(); // phone -> { ts: number, data: leadInfo | null }
 
 // ─── Telemetry — reporta quando seletores/estratégias falham ───
 // Permite detectar mudanças no HTML do WhatsApp antes dos usuários reclamarem.
@@ -240,10 +275,55 @@ function updateConnectionBadge() {
   }
 }
 
-// Verifica conexão a cada 60s (com guard contra context invalidated)
-setInterval(() => {
+// ─── Ciclo de vida: detecção de "context invalidated" ────────
+// Quando o Chrome atualiza a extensão, o content script desta aba vira "órfão":
+// chrome.runtime morre e toda chamada ao service worker falha em silêncio. O painel
+// continua na tela mas para de funcionar. Aqui detectamos isso de forma proativa,
+// desligamos observer/timers (pra não rodar em loop à toa) e avisamos o usuário.
+function isContextValid() {
+  try { return !!(chrome.runtime && chrome.runtime.id); }
+  catch (_) { return false; }
+}
+
+function showReloadBanner() {
+  const panel = document.getElementById(PANEL_ID);
+  if (!panel) return;
+  if (panel.querySelector('.wzsf-reload-banner')) return; // já exibido
+  panel.classList.remove('wzsf-hidden'); // garante que o aviso fique visível
+  document.getElementById('wzsf-fab')?.classList.add('wzsf-hidden');
+
+  const banner = document.createElement('div');
+  banner.className = 'wzsf-reload-banner';
+  banner.style.cssText = 'display:flex;align-items:center;gap:8px;justify-content:space-between;'
+    + 'padding:10px 12px;background:#7f1d1d;color:#fff;font-size:12.5px;line-height:1.4;';
+  banner.innerHTML =
+    '<span>⚠️ Extensão atualizada. Recarregue a página para reativar.</span>'
+    + '<button type="button" class="wzsf-reload-btn" style="flex:none;cursor:pointer;border:0;'
+    + 'border-radius:6px;padding:6px 10px;background:#fff;color:#7f1d1d;font-weight:600;">Recarregar</button>';
+  banner.querySelector('.wzsf-reload-btn').addEventListener('click', () => location.reload());
+
+  const content = panel.querySelector('.wzsf-content') || panel;
+  content.insertBefore(banner, content.firstChild);
+}
+
+// Desliga tudo e avisa. Idempotente — só age uma vez.
+function handleContextInvalidated() {
+  if (extensionInvalidated) return;
+  extensionInvalidated = true;
+  console.log(`[WZ-SF ${VERSION}] Contexto da extensão invalidado — desligando observers/timers e avisando o usuário`);
+  try { observer.disconnect(); } catch (_) {}
+  clearInterval(connCheckInterval);
+  clearInterval(authCheckInterval);
+  clearInterval(heartbeatInterval);
+  clearTimeout(debounceTimer);
+  showReloadBanner();
+}
+
+// Verifica conexão a cada 60s; também detecta context invalidated proativamente.
+connCheckInterval = setInterval(() => {
+  if (!isContextValid()) { handleContextInvalidated(); return; }
   try { chrome.runtime.sendMessage({ action: '_ping' }); checkWebhookConnection(); }
-  catch (_) { /* extension context invalidated — ignora */ }
+  catch (_) { handleContextInvalidated(); }
 }, 60000);
 
 // ─── Verificar autenticação Salesforce ────────────────────────
@@ -256,11 +336,23 @@ function checkSfAuthStatus() {
       updatePanel();
       return;
     }
+    const prevUserId = sfUserId;
     sfAuthenticated = resp?.authenticated || false;
     sfUserName = resp?.userName || '';
     sfUserId   = resp?.userId   || '';
     updateSfAuthIndicator();
     updatePanel();
+    // Janela de startup: o sfUserId só chega ~1,5s após o load. Enquanto está vazio,
+    // tudo é "meu" (fail-open) e a escolha do "meu lead" não acontece. Quando ele
+    // chega/muda, invalida o cache e força re-seleção/re-render pro contato atual —
+    // aplicando a regra de "outro vendedor" e a prioridade do meu lead/opp.
+    if (sfUserId !== prevUserId) {
+      lookupCache.clear();
+      lastLookupPhone = null;
+      updateLeadBadge();
+      updateActionButtons();
+      updateFabLeadStatus();
+    }
     console.log(`[WZ-SF ${VERSION}] SF Auth: ${sfAuthenticated ? 'conectado como ' + sfUserName + ' (ID: ' + sfUserId + ')' : 'não conectado'}`);
   }); } catch (_) { /* extension context invalidated */ }
 }
@@ -350,8 +442,9 @@ function triggerSfLogin() {
 }
 
 // Verifica auth SF a cada 60s (com guard contra context invalidated)
-setInterval(() => {
-  try { checkSfAuthStatus(); } catch (_) { /* extension context invalidated */ }
+authCheckInterval = setInterval(() => {
+  if (!isContextValid()) { handleContextInvalidated(); return; }
+  try { checkSfAuthStatus(); } catch (_) { handleContextInvalidated(); }
 }, 60000);
 
 // Sincroniza login/logout: reage quando background salva ou remove o token
@@ -372,7 +465,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // ─── Consulta Lead no Salesforce pelo telefone ───────────────
-async function lookupLeadByPhone(phone) {
+async function lookupLeadByPhone(phone, force = false) {
   if (!phone || !sfAuthenticated) {
     currentLeadInfo = null;
     lookupInProgress = false;
@@ -380,31 +473,69 @@ async function lookupLeadByPhone(phone) {
     return;
   }
 
-  // Trava forte: se já está rodando OU é o mesmo telefone, NÃO dispara de novo
+  // Trava forte: se já está rodando, NÃO dispara de novo (nem com force —
+  // não faz sentido duas buscas paralelas pro mesmo painel).
   if (lookupInProgress) {
     console.log(`[WZ-SF ${VERSION}] ⏭️ Lookup já em andamento para ${lastLookupPhone}, ignorando ${phone}`);
     return;
   }
-  if (phone === lastLookupPhone && currentLeadInfo !== undefined) {
-    console.log(`[WZ-SF ${VERSION}] ⏭️ Telefone ${phone} já consultado, usando cache em memória`);
-    return;
+
+  // force=true não serve do cache, mas MANTÉM a entrada pra servir de fallback se o
+  // lookup falhar (ela é sobrescrita quando a busca nova dá certo). Antes deletávamos
+  // aqui, o que removia a rede de segurança em caso de erro.
+  if (!force) {
+    // Cache por contato com validade (TTL): serve resultado recente sem ir ao SF.
+    const cached = lookupCache.get(phone);
+    if (cached && (Date.now() - cached.ts) < LOOKUP_TTL_MS) {
+      console.log(`[WZ-SF ${VERSION}] ⚡ Cache hit para ${phone} (${Math.round((Date.now() - cached.ts) / 1000)}s atrás)`);
+      lastLookupPhone = phone;
+      currentLeadInfo = cached.data;
+      updateLeadBadge();
+      updateActionButtons();
+      updateFabLeadStatus();
+      return;
+    }
   }
 
-  console.log(`[WZ-SF ${VERSION}] 🔍 Iniciando lookup para ${phone}`);
+  console.log(`[WZ-SF ${VERSION}] 🔍 Iniciando lookup para ${phone}${force ? ' (force)' : ''}`);
   lastLookupPhone = phone; // Marca como consultado ANTES do await para evitar chamadas paralelas
   lookupInProgress = true;
-  updateLeadBadge(); // Mostra "Carregando..."
-  
+
+  // Watchdog: se algo travar (ex.: service worker morto sem fechar o canal), libera
+  // a trava em 20s — senão a guarda no topo bloquearia todos os lookups seguintes e
+  // os botões ficariam desabilitados pra sempre.
+  const lookupWatchdog = setTimeout(() => {
+    if (!lookupInProgress) return;
+    console.warn(`[WZ-SF ${VERSION}] ⏱️ Watchdog liberou lookup travado para ${phone}`);
+    lookupInProgress = false;
+    try { updateLeadBadge(); updateActionButtons(); updateFabLeadStatus(); } catch (_) {}
+  }, 20000);
+
   try {
+    updateLeadBadge(); // Mostra "Carregando..." (dentro do try: se lançar, o finally libera a trava)
     const result = await sendMessage({ action: 'lookupLead', data: { phone } });
     // wz-api retorna { ok, found, count, leads: [...], opportunities: [...] }
     const found = result?.ok && result?.found;
-    const leadData = found && result.leads?.length > 0 ? result.leads[0] : null;
-    const oppData  = found && result.opportunities?.length > 0 ? result.opportunities[0] : null;
+    const leads = found && Array.isArray(result.leads) ? result.leads : [];
+    const opps  = found && Array.isArray(result.opportunities) ? result.opportunities : [];
+
+    // PRIORIDADE DO VENDEDOR LOGADO: se houver um lead/opp MEU entre os ativos, a
+    // aplicação opera NELE (botões ativos) — mesmo que exista outro registro, de outro
+    // vendedor, eventualmente mais recente. Só caímos pro de outro quando eu NÃO tenho
+    // nenhum próprio (aí o badge mostra o bloqueio "outro vendedor").
+    const myLead = sfUserId ? leads.find(l => l.ownerId === sfUserId) : null;
+    const myOpp  = sfUserId ? opps.find(o => o.ownerId === sfUserId) : null;
+    const haveMine = !!(myLead || myOpp);
+
+    // Tendo registro próprio, ignoro os de outro vendedor: não os uso como base nem
+    // deixo uma opp de outro "sequestrar" a posse via regra opp-first.
+    const leadData = myLead || (haveMine ? null : (leads[0] || null));
+    const oppData  = myOpp  || (haveMine ? null : (opps[0]  || null));
 
     if (leadData) {
-      currentLeadInfo = leadData;
-      console.log(`[WZ-SF ${VERSION}] 🔗 Lead ATIVO: ${currentLeadInfo.leadName} (${currentLeadInfo.leadId}) | Owner: ${currentLeadInfo.ownerName}`);
+      // Sobrescreve a opp que a API anexa (sempre a primeira) pela opp escolhida acima.
+      currentLeadInfo = { ...leadData, opportunity: oppData };
+      console.log(`[WZ-SF ${VERSION}] 🔗 Lead ATIVO: ${currentLeadInfo.leadName} (${currentLeadInfo.leadId}) | Owner: ${currentLeadInfo.ownerName}${myLead ? ' [meu]' : ''}`);
     } else if (oppData) {
       // Apenas Oportunidade ativa (sem Lead ativo) — cria um shim sem leadId
       currentLeadInfo = {
@@ -418,19 +549,57 @@ async function lookupLeadByPhone(phone) {
         opportunity: oppData,
       };
       console.log(`[WZ-SF ${VERSION}] 💼 Oportunidade ATIVA: ${oppData.oppName} (${oppData.oppId})`);
-    } else {
+    } else if (result?.ok) {
+      // Lookup OK e SEM registros ativos → genuinamente "sem leads".
       currentLeadInfo = null;
-      console.log(`[WZ-SF ${VERSION}] ❌ Nenhum Lead/Oportunidade ATIVO para ${phone}`, result?.error || '');
+      console.log(`[WZ-SF ${VERSION}] ❌ Nenhum Lead/Oportunidade ATIVO para ${phone}`);
+    } else {
+      // Lookup FALHOU (erro/timeout/transitório). NÃO rebaixa pra "sem leads": tenta o
+      // último resultado bom em cache (mesmo expirado); se não houver, mantém o que já
+      // está na tela. Rebaixar por falha de rede reabilitaria os botões indevidamente.
+      const cached = lookupCache.get(phone);
+      if (cached) currentLeadInfo = cached.data;
+      console.warn(`[WZ-SF ${VERSION}] Lookup falhou para ${phone} — ${cached ? 'usando cache' : 'mantendo estado'}:`, result?.error || '(sem detalhe)');
+    }
+
+    // Só cacheia quando a chamada deu certo (inclusive o "nenhum lead" legítimo).
+    if (result?.ok) {
+      lookupCache.set(phone, { ts: Date.now(), data: currentLeadInfo });
     }
   } catch (e) {
-    currentLeadInfo = null;
-    console.warn(`[WZ-SF ${VERSION}] Erro ao buscar Lead:`, e.message);
+    // Exceção inesperada: NÃO rebaixa pra "sem leads" — tenta cache, senão mantém estado.
+    const cached = lookupCache.get(phone);
+    if (cached) currentLeadInfo = cached.data;
+    console.warn(`[WZ-SF ${VERSION}] Erro ao buscar Lead (${cached ? 'usando cache' : 'mantendo estado'}):`, e.message);
   } finally {
+    clearTimeout(lookupWatchdog);
     lookupInProgress = false;
     updateLeadBadge();
     updateActionButtons(); // só atualiza botões quando lookup termina
     updateFabLeadStatus();
   }
+}
+
+// ─── Propriedade do registro ativo (Lead/Opp) ────────────────
+// As ações miram a Oportunidade primeiro (quando existe) e, senão, o Lead.
+// Então "é meu?" é decidido pelo dono desse registro-alvo — vale igual pra Lead e
+// Oportunidade, mantendo badge, botões e FAB coerentes.
+function activeRecordOwnerId() {
+  if (!currentLeadInfo) return null;
+  return currentLeadInfo.opportunity?.oppId
+    ? currentLeadInfo.opportunity.ownerId
+    : currentLeadInfo.ownerId;
+}
+function activeRecordOwnerName() {
+  if (!currentLeadInfo) return '';
+  return (currentLeadInfo.opportunity?.oppId
+    ? currentLeadInfo.opportunity.ownerName
+    : currentLeadInfo.ownerName) || '';
+}
+function isActiveRecordMine() {
+  if (!currentLeadInfo) return true;
+  const owner = activeRecordOwnerId();
+  return !sfUserId || owner === sfUserId;
 }
 
 // ─── Atualiza estado dos botões de ação ──────────────────────
@@ -451,22 +620,23 @@ function updateActionButtons() {
     return;
   }
 
-  const isMyLead = !sfUserId || currentLeadInfo.ownerId === sfUserId;
+  const mine = isActiveRecordMine();
 
-  // "Salvar Lead" bloqueado se já existe Lead ativo
+  // "Criar lead" só é bloqueado quando EU já tenho lead/opp ativo. Se o registro ativo
+  // é de OUTRO vendedor (ou não há nenhum), posso criar o meu.
   const leadBtn = actionsEl.querySelector('[data-action="lead"]');
   if (leadBtn) {
-    const hasActiveLead = !!currentLeadInfo.leadId;
-    leadBtn.disabled = hasActiveLead;
-    leadBtn.title = hasActiveLead ? 'Já existe lead ativo para este contato' : '';
-    leadBtn.classList.toggle('wzsf-btn-blocked', hasActiveLead);
+    leadBtn.disabled = mine;
+    leadBtn.title = mine ? 'Você já tem um lead/oportunidade ativo para este contato' : '';
+    leadBtn.classList.toggle('wzsf-btn-blocked', mine);
   }
 
-  // Demais ações: bloqueadas se lead é de outro vendedor
-  const blocked = !!currentLeadInfo.leadId && !isMyLead;
+  // Demais ações: bloqueadas se o registro ativo (Lead OU Opp) é de outro vendedor
+  const blocked = !mine;
+  const ownerName = activeRecordOwnerName();
   actionsEl.querySelectorAll('[data-action="conversation"], [data-action="activity"], [data-action="open"]').forEach(btn => {
     btn.disabled = blocked;
-    btn.title = blocked ? `Em atendimento por ${currentLeadInfo.ownerName}` : '';
+    btn.title = blocked ? `Em atendimento por ${ownerName}` : '';
     btn.classList.toggle('wzsf-btn-blocked', blocked);
   });
 }
@@ -514,21 +684,33 @@ function updateLeadBadge() {
       host.appendChild(badge);
     }
 
-    const isMyLead = !sfUserId || currentLeadInfo.ownerId === sfUserId;
+    const isMyLead = isActiveRecordMine();
     badge.className = `wzsf-lead-badge ${isMyLead ? 'wzsf-lead-badge--found' : 'wzsf-lead-badge--other'}`;
     const encerrado = currentLeadInfo.encerrado || false;
     const opp = currentLeadInfo.opportunity;
-
-    // Determina o dot de status do lead/oportunidade
     const hasLead = !!currentLeadInfo.leadId;
+
+    // ── Regra: registro ativo (Lead OU Opp) de OUTRO vendedor ───
+    // Mostra SÓ a mensagem, sem link nem detalhes e sem nada clicável. Vale igual
+    // pra Lead e Oportunidade — a mensagem reflete o tipo do registro ativo.
+    if (!isMyLead) {
+      const msg = opp?.oppId
+        ? 'Oportunidade ativa com outro vendedor'
+        : 'Lead ativo com outro vendedor';
+      badge.className = 'wzsf-lead-badge wzsf-lead-badge--other';
+      badge.innerHTML = `
+        <span class="wzsf-lead-dot wzsf-dot-other"></span>
+        <span class="wzsf-lead-text">${msg}</span>
+      `;
+      badge.style.display = 'inline-flex';
+      return;
+    }
+
+    // Determina o dot de status (daqui pra baixo, só registros MEUS)
     let dotClass, leadLabel;
     if (!hasLead) {
-      // Só oportunidade ativa (sem lead)
       dotClass  = 'wzsf-dot-online';
       leadLabel = '💼 Oportunidade Ativa';
-    } else if (!isMyLead) {
-      dotClass  = 'wzsf-dot-other';
-      leadLabel = '⚠️ Em atendimento';
     } else {
       dotClass  = 'wzsf-dot-online';
       leadLabel = 'Lead Ativo';
@@ -550,12 +732,6 @@ function updateLeadBadge() {
         </div>`;
     }
 
-    // Aviso de outro vendedor
-    let ownerWarning = '';
-    if (!isMyLead) {
-      ownerWarning = `<div class="wzsf-owner-warning">👤 Vendedor: ${escHtml(currentLeadInfo.ownerName || '')}</div>`;
-    }
-
     badge.innerHTML = `
       <div class="wzsf-lead-row">
         <a href="#" class="wzsf-lead-link" title="Abrir Lead no Salesforce">
@@ -564,7 +740,6 @@ function updateLeadBadge() {
           <span class="wzsf-lead-status">${escHtml(currentLeadInfo.leadStatus || '')}</span>
         </a>
       </div>
-      ${ownerWarning}
       ${oppHtml}
     `;
     badge.style.display = 'block';
@@ -623,16 +798,23 @@ const SEL = {
     '#main header span[title] ~ span',
     '#main header div[title]',
   ],
-  // Painel "Dados do contato" (drawer lateral direito) — abre ao clicar no nome
-  // Esses seletores são muito mais estáveis que os do header
+  // Painel "Dados do contato" (drawer lateral direito) — abre ao clicar no nome.
+  // ATENÇÃO: o WhatsApp atual junta vários tokens no MESMO data-testid
+  // (ex.: "contact-info-subtitle selectable-text"). Por isso usamos ~= (contém
+  // token) e NÃO = (exato) — exato não casa com valor de múltiplos tokens.
+  drawerContainer: [
+    '[data-testid="drawer-right"]',
+    '[data-testid~="chat-info-drawer"]',
+    '[data-testid~="contact-info-header"]',
+  ],
   drawerContactName: [
-    '[data-testid="contact-info-subtitle"]',
-    '[data-testid="contact-info-name"]',
-    '[data-testid="conversation-info-header-chat-title"]',
+    '[data-testid~="contact-info-subtitle"]',
+    '[data-testid~="contact-info-name"]',
+    '[data-testid~="conversation-info-header-chat-title"]',
   ],
   drawerContactPhone: [
     // O telefone aparece no painel como selectable-text dentro do drawer
-    '[data-testid="selectable-text"]',
+    '[data-testid~="selectable-text"]',
   ],
 };
 
@@ -704,44 +886,51 @@ function getConversationContainer() {
 
 // Detecta se o chat atual é um grupo (@g.us) ou contato individual (@c.us)
 function isGroupChat() {
-  // 1) Store-first — definitivo, imune a mudanças no HTML
+  // ── Sinais POSITIVOS fortes, checados ANTES do Store ───────────────────
+  // Motivo: já vimos grupos em que o Store reporta isGroup=false (errado) e
+  // ainda devolve um "telefone" com os números dos participantes concatenados.
+  // Confiar no Store-first nesses casos deixava o grupo passar. Estes sinais
+  // raramente dão falso-positivo, então têm prioridade.
+
+  // a) @g.us em QUALQUER data-id da página (mensagem de grupo)
+  if (document.querySelector('[data-id*="@g.us"]')) {
+    reportTelemetry('group_detection', 'dataid_gus', { isGroup: true });
+    return true;
+  }
+
+  // b) Título com 2+ vírgulas = lista de participantes (ex: "Ana, Bia, Caio…")
+  const titleEl = queryFirst(SEL.contactTitle);
+  const title = titleEl?.getAttribute('title') || titleEl?.textContent?.trim() || '';
+  if ((title.match(/,/g) || []).length >= 2) {
+    reportTelemetry('group_detection', 'title_comma_count', { isGroup: true });
+    return true;
+  }
+
+  // c) Ícone de grupo no header
+  const headerEl = queryFirst(SEL.header);
+  if (headerEl?.querySelector('[data-icon="default-group"], [data-icon="default-group-refreshed"], [data-icon="group"], [data-testid="group"], [data-testid="default-group"], [aria-label*="rupo"]')) {
+    reportTelemetry('group_detection', 'header_group_icon', { isGroup: true });
+    return true;
+  }
+
+  // ── Store (definitivo para o caso individual) ──────────────────────────
   if (storeStatus === 'found' && storeData.source === 'store') {
     return !!storeData.isGroup;
   }
 
-  // 2) Fallback DOM: data-id das mensagens
+  // ── Fallbacks DOM restantes ────────────────────────────────────────────
   const mainEl = getConversationContainer();
-  if (mainEl) {
-    // Grupos usam @g.us nos data-id das mensagens
-    if (mainEl.querySelector('[data-id*="@g.us"]')) {
-      reportTelemetry('group_detection', 'fallback_dataid_gus', { isGroup: true });
-      return true;
-    }
-    // Se tem @c.us é contato individual
-    if (mainEl.querySelector('[data-id*="@c.us"]')) return false;
-  }
+  if (mainEl && mainEl.querySelector('[data-id*="@c.us"]')) return false;
 
-  // 3) Fallback heurístico (frágil — strings localizadas)
   const subEl = queryFirst(SEL.contactSub);
   const sub = subEl?.getAttribute('title') || subEl?.textContent?.trim() || '';
   if (sub.includes('dados do grupo') || sub.includes('group info')) {
     reportTelemetry('group_detection', 'fallback_localized_string', { isGroup: true });
     return true;
   }
-  // Lista de participantes: 2+ vírgulas e não é horário
   if ((sub.match(/,/g) || []).length >= 2 && !sub.includes(':')) {
     reportTelemetry('group_detection', 'fallback_comma_count', { isGroup: true });
     return true;
-  }
-
-  // 4) Último recurso: ícone de grupo no header
-  const headerEl = queryFirst(SEL.header);
-  if (headerEl) {
-    const groupIcon = headerEl.querySelector('[data-testid="group"], [data-icon="group"], [data-testid="default-group"]');
-    if (groupIcon) {
-      reportTelemetry('group_detection', 'fallback_group_icon', { isGroup: true });
-      return true;
-    }
   }
 
   return false;
@@ -930,9 +1119,16 @@ async function openDrawerToReadPhone(contactName) {
 function extractFromContactDrawer() {
   const result = { name: '', phone: '' };
 
-  // Tenta data-testid="contact-info-subtitle" — esse é o nome no drawer
+  // IMPORTANTE: escopa TUDO no container do drawer "Dados do contato".
+  // O drawer nunca contém mensagens do chat — então não há risco de pegar
+  // número digitado numa conversa. Se o drawer não existe, retorna vazio.
+  const drawer = queryFirst(SEL.drawerContainer);
+  if (!drawer) return result;
+
+  // Nome do contato (dentro do drawer). data-testid pode vir combinado
+  // (ex.: "contact-info-subtitle selectable-text") — por isso ~= nos seletores.
   for (const sel of SEL.drawerContactName) {
-    const el = document.querySelector(sel);
+    const el = drawer.querySelector(sel);
     if (!el) continue;
     const text = (el.textContent || '').trim();
     if (text && !isStatusText(text) && text.length >= 2 && text.length <= 80) {
@@ -941,20 +1137,65 @@ function extractFromContactDrawer() {
     }
   }
 
-  // Procura telefones (formato BR ou internacional) em selectable-text spans
-  // Restringe a busca: precisa estar perto de um drawerContactName se possível
-  document.querySelectorAll('[data-testid="selectable-text"]').forEach(el => {
-    if (result.phone) return;
-    const text = (el.textContent || '').trim();
-    // Telefone: começa com + ou tem dígitos formatados (XX XXX-XXXX)
-    if (!/^[\+\d\s()\-]{7,25}$/.test(text)) return;
-    const digits = text.replace(/\D/g, '');
-    if (digits.length >= 8 && digits.length <= 15) {
-      result.phone = digits;
-    }
-  });
+  // Telefone: primeiro selectable-text DENTRO do drawer cujo texto seja telefone.
+  // O número do contato aparece antes do "Recado/sobre" no DOM, então o primeiro
+  // match é o telefone certo.
+  for (const sel of SEL.drawerContactPhone) {
+    if (result.phone) break;
+    drawer.querySelectorAll(sel).forEach(el => {
+      if (result.phone) return;
+      const text = (el.textContent || '').trim();
+      // Telefone: começa com + ou tem dígitos formatados (XX XXX-XXXX)
+      if (!/^[\+\d\s()\-]{7,25}$/.test(text)) return;
+      const digits = text.replace(/\D/g, '');
+      if (digits.length >= 8 && digits.length <= 15) {
+        result.phone = digits;
+      }
+    });
+  }
 
   return result;
+}
+
+// ─── Fallback por TEXTO (último recurso — caso Waspeed/3rd-party) ────────────
+// Extensões como o Waspeed re-renderizam o WhatsApp e removem os data-testid que
+// usamos. Aí o telefone fica num <span> só com classes ofuscadas. Este fallback
+// varre o TEXTO procurando um telefone, mas com duas travas pra não pegar lixo:
+//   1) ESCOPO: ignora mensagens, lista de conversas e caixa de digitação;
+//   2) VALIDAÇÃO BR estrita (isPlausibleBrPhone) — rejeita número de mensagem.
+// Roda só quando todos os métodos confiáveis falharam. Retorna '' se nada plausível.
+function extractPhoneByTextScan() {
+  // Grupo: não tenta (evita pegar número de participante)
+  if (document.querySelector('[data-id*="@g.us"]')) return '';
+
+  const convContainer = getConversationContainer();
+  const sideEl    = document.querySelector('#pane-side');
+  const composeEl = document.querySelector('[data-testid="conversation-compose-box-input"], #main footer');
+  const inExcluded = (el) =>
+    (convContainer && convContainer.contains(el)) || // mensagens
+    (sideEl && sideEl.contains(el)) ||               // lista de conversas
+    (composeEl && composeEl.contains(el));           // caixa de digitação
+
+  // Procura primeiro no header (número costuma virar título quando o contato não
+  // está salvo); depois no documento todo (com as exclusões acima).
+  const headerEl = queryFirst(SEL.header);
+  const regions = headerEl ? [headerEl, document] : [document];
+
+  for (const region of regions) {
+    const spans = region.querySelectorAll('span');
+    for (const el of spans) {
+      if (el.children.length > 0) continue;  // só folhas (onde o texto realmente está)
+      if (inExcluded(el)) continue;
+      const text = (el.textContent || '').trim();
+      // Pré-filtro barato: parece telefone (começa com + ou dígito)
+      if (!/^[\+\d][\d\s()\-]{6,24}$/.test(text)) continue;
+      // Trava principal: só aceita se for um telefone BR plausível
+      if (isPlausibleBrPhone(text)) {
+        return normalizePhoneBR(text);
+      }
+    }
+  }
+  return '';
 }
 
 // Extrai nome do contato do header — robusto contra mudanças do WhatsApp.
@@ -1054,8 +1295,13 @@ function extractContactInfo() {
   const name = (isStatusText(storeName) ? '' : storeName) || domName;
 
   // Telefone: Store > drawer > DOM data-id > subtítulo
-  let phone = storeData.phone || '';
-  let phoneSource = storeHasPhone ? 'store' : '';
+  // Valida o tamanho do número do Store: um telefone real tem no máx. 15 dígitos
+  // (E.164). Grupos às vezes devolvem os números dos participantes CONCATENADOS —
+  // descartamos esse lixo aqui (e o isGroupChat já bloqueia a UI nesses casos).
+  const storePhoneDigits = (storeData.phone || '').replace(/\D/g, '');
+  const storePhoneValid = storePhoneDigits.length >= 8 && storePhoneDigits.length <= 15;
+  let phone = storePhoneValid ? storePhoneDigits : '';
+  let phoneSource = phone ? 'store' : '';
 
   // Estratégia drawer — painel "Dados do contato" abre com o telefone visível
   if (!phone && drawerData.phone) {
@@ -1079,7 +1325,7 @@ function extractContactInfo() {
   // (ex: "+55 65 9605-4118" ou "11 98598-6627"), extrai os dígitos do nome
   if (!phone && name) {
     const digitsFromName = name.replace(/\D/g, '');
-    if (digitsFromName.length >= 8) {
+    if (digitsFromName.length >= 8 && digitsFromName.length <= 15) {
       phone = digitsFromName;
       phoneSource = 'name-digits';
     }
@@ -1173,7 +1419,20 @@ function extractContactInfo() {
     }
   }
 
-  return { name, phone };
+  // ÚLTIMO recurso (Waspeed/3rd-party removeu os data-testid): varre o texto por
+  // um telefone BR plausível, escopado pra ignorar mensagens. Marca como INCERTO —
+  // a UI mostra um aviso "confira" porque é um chute educado, não fonte canônica.
+  let uncertain = false;
+  if (!phone) {
+    const scanned = extractPhoneByTextScan();
+    if (scanned) {
+      phone = scanned;
+      phoneSource = 'text-scan';
+      uncertain = true;
+    }
+  }
+
+  return { name, phone, phoneSource, uncertain };
 }
 
 // Sobe na árvore DOM a partir de 'el' até 'root' buscando direção da mensagem
@@ -1458,6 +1717,13 @@ function updatePanel() {
       b.disabled = shouldDisable;
       b.title = shouldDisable ? (isGroup ? 'Grupos não suportados' : 'Faça login no Salesforce') : '';
     });
+    // Reaplica as regras de propriedade POR CIMA do baseline acima. Sem isto, o
+    // forEach reabilitaria a cada tick os botões que devem ficar bloqueados quando o
+    // lead/registro é de outro vendedor (o heartbeat roda updatePanel a cada 4s).
+    if (!shouldDisable) {
+      updateActionButtons();
+      updateDisqualifyButton();
+    }
   }
 
   if (isGroup) {
@@ -1471,6 +1737,14 @@ function updatePanel() {
   }
 
   const contact = extractContactInfo();
+
+  // RESILIÊNCIA a extração transitória vazia: o header existe (isConversationOpen deu
+  // true lá em cima), mas o WhatsApp está re-renderizando — típico ao voltar de muito
+  // tempo com a aba em 2º plano (reconexão). Nesse instante name/phone vêm vazios.
+  // NÃO apaga o contato/lead já exibido: preserva o último estado bom e espera os
+  // dados válidos voltarem (heartbeat/observer re-chamam updatePanel).
+  if (!contact.name && !contact.phone) return;
+
   // Chave de conversa baseada APENAS no nome — assim quando o phone aparece depois
   // (via drawer ou atualização do WA), não disparamos um segundo lookup achando
   // que mudou de conversa.
@@ -1489,7 +1763,11 @@ function updatePanel() {
     lastLookupPhone = null;
     updateLeadBadge();
     updateFabLeadStatus();
-    // Limpa cache de tentativas — evita crescimento infinito.
+    // Ao ENTRAR (ou voltar) numa conversa, libera uma nova tentativa de auto-drawer
+    // pra ela. Sem isto, se o cache de telefone (5 min) já tiver expirado, nunca mais
+    // tentaríamos pegar o número e o painel ficaria preso em "Aguardando número...".
+    // O anti-loop continua valendo DENTRO da mesma conversa (só re-tenta ao trocar).
+    drawerAttempted.delete(conversationKey);
     if (drawerAttempted.size > 20) {
       drawerAttempted.clear();
     }
@@ -1533,15 +1811,13 @@ function updatePanel() {
     }
   }
 
-  // Se ainda não há telefone, garante que badge fique vazio
-  if (!contact.phone) {
-    if (currentLeadInfo !== null) {
-      currentLeadInfo = null;
-      updateLeadBadge();
-      updateFabLeadStatus();
-    }
-    return;
-  }
+  // Sem telefone agora: NÃO apaga o lead já exibido. Quando a conversa não mudou, um
+  // telefone vazio aqui é quase sempre falha transitória de extração (WhatsApp
+  // re-renderizando ao voltar de 2º plano). Quem zera o estado é a troca real de
+  // conversa (acima) ou o fechamento do chat (topo do updatePanel). Antes, apagávamos
+  // currentLeadInfo aqui mantendo lastLookupPhone — e o lead não voltava nem quando o
+  // telefone reaparecia (o lookup via "mesmo telefone" e pulava a re-busca).
+  if (!contact.phone) return;
 
   // Lookup: busca sempre que muda de contato
   // (lastLookupPhone foi resetado ao trocar de conversa — garante busca fresca sempre)
@@ -1559,6 +1835,19 @@ function updatePanel() {
       }
       updateLeadBadge();
       lookupLeadByPhone(contact.phone);
+    }
+  }
+
+  // Aviso visual: telefone vindo do fallback por texto (Waspeed) é um chute
+  // educado, não fonte canônica — marca pra o usuário conferir.
+  const phoneElMark = panel.querySelector('.wzsf-contact-phone');
+  if (phoneElMark) {
+    if (contact.phone && contact.uncertain) {
+      phoneElMark.classList.add('wzsf-phone-uncertain');
+      phoneElMark.title = 'Número detectado automaticamente (página alterada por outra extensão) — confira se está correto';
+    } else {
+      phoneElMark.classList.remove('wzsf-phone-uncertain');
+      phoneElMark.removeAttribute('title');
     }
   }
 }
@@ -1776,7 +2065,9 @@ function createPanel() {
     refreshBtn.addEventListener('click', () => {
       if (!sfAuthenticated || lookupInProgress) return;
       const contact = extractContactInfo();
-      if (!contact.phone) return;
+      // Fallback: se o scrape do DOM falhar no clique, usa o telefone já em uso
+      const phone = contact.phone || lastLookupPhone;
+      if (!phone) return;
       // Força re-lookup resetando o cache do telefone
       lastLookupPhone = null;
       currentLeadInfo = null;
@@ -1784,7 +2075,7 @@ function createPanel() {
       updateFabLeadStatus();
       // Animação de rotação enquanto carrega
       refreshBtn.classList.add('wzsf-spinning');
-      lookupLeadByPhone(contact.phone, true).finally(() => {
+      lookupLeadByPhone(phone, true).finally(() => {
         refreshBtn.classList.remove('wzsf-spinning');
       });
     });
@@ -1887,9 +2178,9 @@ function updateFabLeadStatus() {
     fab.title = currentLeadInfo?.encerrado
       ? 'SF Sync — Lead encerrado (disponível)'
       : 'SF Sync — Sem Lead cadastrado';
-  } else if (sfUserId && currentLeadInfo.ownerId !== sfUserId) {
+  } else if (!isActiveRecordMine()) {
     fab.classList.add('wzsf-fab-other-lead'); // laranja
-    fab.title = `SF Sync — Em atendimento por ${currentLeadInfo.ownerName || 'outro vendedor'}`;
+    fab.title = `SF Sync — Em atendimento por ${activeRecordOwnerName() || 'outro vendedor'}`;
   } else {
     fab.classList.add('wzsf-fab-my-lead');   // verde
     fab.title = `SF Sync — Lead: ${currentLeadInfo.leadName || ''}`;
@@ -1970,7 +2261,8 @@ async function handleAction(action, contact, conversation, panel) {
         lastLookupPhone = null;
         currentLeadInfo = null;
         updateLeadBadge();
-        setTimeout(() => lookupLeadByPhone(confirmed.phone), 1500);
+        // force=true: lead recém-criado precisa furar o cache de 2 min
+        setTimeout(() => lookupLeadByPhone(confirmed.phone, true), 1500);
       }
     } else if (result?.duplicate) {
       setStatus(status, 'error', 'Já enviado nas últimas 24h');
@@ -2006,6 +2298,7 @@ function sendMessage(msg) {
           const err = chrome.runtime.lastError.message || '';
           // "Extension context invalidated" = extensão recarregada, basta recarregar a página
           if (err.includes('Extension context invalidated') || err.includes('context invalidated')) {
+            handleContextInvalidated();
             resolve({ ok: false, error: 'Extensão atualizada. Recarregue a página (F5).' });
           } else {
             resolve({ ok: false, error: err });
@@ -2015,6 +2308,7 @@ function sendMessage(msg) {
         }
       });
     } catch (e) {
+      handleContextInvalidated();
       resolve({ ok: false, error: 'Extensão atualizada. Recarregue a página (F5).' });
     }
   });
@@ -2055,7 +2349,14 @@ function updateDisqualifyButton() {
   const hasActiveLead = !!currentLeadInfo?.leadId;
   const hasActiveOpp  = !!currentLeadInfo?.opportunity?.oppId;
 
-  btn.disabled = !(hasActiveLead || hasActiveOpp);
+  // Só o dono pode desqualificar (mesma regra das demais ações: registro ativo =
+  // Opp se houver, senão Lead).
+  const isMyRecord = isActiveRecordMine();
+  const blocked = (hasActiveLead || hasActiveOpp) && !isMyRecord;
+
+  btn.disabled = !((hasActiveLead || hasActiveOpp) && isMyRecord);
+  btn.title = blocked ? `Em atendimento por ${activeRecordOwnerName() || 'outro vendedor'}` : '';
+  btn.classList.toggle('wzsf-btn-blocked', blocked);
 }
 
 // ─── Registrar conversa como Task no Salesforce ──────────────
@@ -2332,7 +2633,8 @@ async function handleDisqualify(panel) {
       currentLeadInfo = null;
       updateLeadBadge();
       const contact = extractContactInfo();
-      if (contact.phone) setTimeout(() => lookupLeadByPhone(contact.phone), 1500);
+      // force=true: desqualificação muda o status — precisa furar o cache de 2 min
+      if (contact.phone) setTimeout(() => lookupLeadByPhone(contact.phone, true), 1500);
     } else {
       setStatus(status, 'error', resp?.error || 'Erro ao desqualificar');
     }
@@ -2742,11 +3044,52 @@ const observer = new MutationObserver((mutations) => {
   debounceTimer = setTimeout(updatePanel, 400);
 });
 
-observer.observe(document.body, {
+let observedBody = document.body;
+observer.observe(observedBody, {
   childList: true,
   subtree: true,
   attributes: false,
   characterData: false,
+});
+
+// ─── Heartbeat de auto-cura ──────────────────────────────────
+// O MutationObserver é a fonte primária de "trocou de conversa", mas pode parar de
+// acionar updatePanel: num chat muito ativo o debounce de 400ms é reiniciado sem
+// parar (updatePanel nunca chega a rodar), ou o observer fica órfão. Este heartbeat
+// re-roda updatePanel num intervalo fixo, garantindo que a detecção do contato se
+// recupere sozinha mesmo que o observer pare. É a correção direta do sintoma
+// "o painel continua mas para de tentar encontrar o contato".
+heartbeatInterval = setInterval(() => {
+  if (!isContextValid()) { handleContextInvalidated(); return; }
+  // Se o WhatsApp trocou o <body> observado, re-observa o novo.
+  if (observedBody !== document.body) {
+    try { observer.disconnect(); } catch (_) {}
+    observedBody = document.body;
+    observer.observe(observedBody, { childList: true, subtree: true, attributes: false, characterData: false });
+  }
+  try { updatePanel(); }
+  catch (e) { console.warn(`[WZ-SF ${VERSION}] heartbeat updatePanel erro:`, e.message); }
+}, 4000);
+
+// ─── Re-sincroniza ao voltar pra aba ─────────────────────────
+// Em 2º plano o navegador estrangula os timers e o WhatsApp re-renderiza/reconecta ao
+// voltar. Quando a aba fica visível de novo, força um updatePanel logo após (dando
+// tempo do header restaurar). Se ficou escondida por bastante tempo, re-verifica o
+// lead do contato atual (status pode ter mudado no SF enquanto você estava fora).
+let wzsfHiddenSince = 0;
+document.addEventListener('visibilitychange', () => {
+  if (extensionInvalidated) return;
+  if (document.visibilityState === 'hidden') { wzsfHiddenSince = Date.now(); return; }
+  const hiddenMs = wzsfHiddenSince ? (Date.now() - wzsfHiddenSince) : 0;
+  wzsfHiddenSince = 0;
+  setTimeout(() => {
+    if (!isContextValid()) { handleContextInvalidated(); return; }
+    try { updatePanel(); } catch (_) {}
+    // Ficou fora > 2 min: revalida o lead do contato atual (pode ter mudado no SF).
+    if (hiddenMs > 2 * 60 * 1000 && sfAuthenticated && lastLookupPhone && !lookupInProgress) {
+      lookupLeadByPhone(lastLookupPhone, true);
+    }
+  }, 1200);
 });
 
 // Checagem inicial (aguarda um pouco para o inject.js carregar)

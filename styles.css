@@ -460,6 +460,17 @@
   text-overflow: ellipsis;
 }
 
+/* Telefone detectado pelo fallback por texto (Waspeed/3rd-party) — chute educado.
+   Cor de alerta + sufixo "confira" pra o usuário validar antes de confiar. */
+.wzsf-contact-phone.wzsf-phone-uncertain {
+  color: #b26b00;
+  cursor: help;
+}
+.wzsf-contact-phone.wzsf-phone-uncertain::after {
+  content: " ⚠️ confira";
+  font-family: inherit;
+}
+
 /* Lead badge: mt-2 inline-flex rounded-full bg-amber-100 px-2 py-0.5
    text-[10.5px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 */
 .wzsf-lead-badge {
