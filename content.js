@@ -1733,6 +1733,15 @@ function updatePanel() {
     panel.querySelector('.wzsf-contact-phone').textContent = 'Grupo — sem envio';
     setStatus(panel.querySelector('.wzsf-status'), 'idle', 'Grupo não suportado');
     lastConversationKey = 'group_' + groupName;
+    // Limpa o estado de lead/opp herdado do contato anterior e REMOVE o badge —
+    // senão "Oportunidade ativa…"/"Lead ativo…" fica pendurado ao entrar no grupo.
+    // (Não chamamos updateLeadBadge() porque ele exibiria "Sem leads vinculados".)
+    currentLeadInfo = null;
+    lastLookupPhone = null;
+    lookupInProgress = false;
+    panel.querySelector('.wzsf-lead-badge')?.remove();
+    updateDisqualifyButton();
+    updateFabLeadStatus();
     return;
   }
 
