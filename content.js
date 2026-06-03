@@ -745,7 +745,7 @@ function updateLeadBadge() {
           <span class="wzsf-lead-text">${leadLabel}: ${escHtml(currentLeadInfo.leadName || currentLeadInfo.leadId)}</span>
           <span class="wzsf-lead-status">${escHtml(currentLeadInfo.leadStatus || '')}</span>
         </a>
-        <div class="wzsf-lead-model">${modeloTexto}</div>
+        <div class="wzsf-lead-model" title="${modeloTexto}">${modeloTexto}</div>
       </div>
       ${oppHtml}
     `;
