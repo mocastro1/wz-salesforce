@@ -1697,6 +1697,8 @@ function updatePanel() {
     document.body.appendChild(panel);
     fab = createFAB();
     document.body.appendChild(fab);
+    applyWidgetPos(panel); // restaura posição salva (painel já nasce visível)
+    loadWidgetPos();       // garante carregar do storage caso ainda não tenha
     console.log('[WZ-SF] Painel + FAB criados ✅');
   }
 
@@ -2008,6 +2010,7 @@ function createPanel() {
     panel.classList.add('wzsf-hidden');
     const fab = document.getElementById('wzsf-fab');
     fab?.classList.remove('wzsf-hidden');
+    applyWidgetPos(fab);   // FAB aparece onde o painel estava
   });
 
   // ─── Arrastar o painel ─────────────────────────────────────
@@ -2131,6 +2134,7 @@ function setupPanelShortcuts(panel) {
       panel.classList.add('wzsf-hidden');
       const fab = document.getElementById('wzsf-fab');
       fab?.classList.remove('wzsf-hidden');
+      applyWidgetPos(fab);   // FAB aparece onde o painel estava
       return;
     }
 
@@ -2153,6 +2157,46 @@ function setupPanelShortcuts(panel) {
 }
 
 // ─── FAB (Floating Action Button) ──────────────────────────────
+// ─── Posição compartilhada painel ⇄ FAB (persistida) ─────────
+// Painel e FAB ancoram o canto superior-esquerdo na MESMA posição salva, então
+// a ferramenta sempre reaparece onde foi deixada (arrastando qualquer um dos
+// dois). Sem posição salva, fica no canto padrão definido no CSS.
+const WIDGET_POS_KEY = 'wzsf_widget_pos';
+let widgetPos = null; // { top, left } em px, ou null = canto padrão
+
+function applyWidgetPos(el) {
+  if (!widgetPos || !el) return;
+  const w = el.offsetWidth || 40;
+  const h = el.offsetHeight || 40;
+  const left = Math.max(4, Math.min(widgetPos.left, window.innerWidth  - w - 4));
+  const top  = Math.max(4, Math.min(widgetPos.top,  window.innerHeight - h - 4));
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.style.right = 'auto';
+  el.style.bottom = 'auto';
+}
+
+function saveWidgetPos(top, left) {
+  widgetPos = { top, left };
+  try { chrome.storage?.local?.set({ [WIDGET_POS_KEY]: widgetPos }); } catch (_) {}
+}
+
+function loadWidgetPos() {
+  try {
+    chrome.storage?.local?.get(WIDGET_POS_KEY, (r) => {
+      const p = r?.[WIDGET_POS_KEY];
+      if (p && Number.isFinite(p.top) && Number.isFinite(p.left)) {
+        widgetPos = p;
+        // Aplica no que já estiver visível na tela.
+        const panel = document.getElementById(PANEL_ID);
+        const fab = document.getElementById('wzsf-fab');
+        if (panel && !panel.classList.contains('wzsf-hidden')) applyWidgetPos(panel);
+        if (fab && !fab.classList.contains('wzsf-hidden')) applyWidgetPos(fab);
+      }
+    });
+  } catch (_) {}
+}
+
 function createFAB() {
   const fab = document.createElement('button');
   fab.id = 'wzsf-fab';
@@ -2187,11 +2231,7 @@ function createFAB() {
       document.removeEventListener('mousemove', onMove, true);
       document.removeEventListener('mouseup', onUp, true);
       if (dragged) {
-        try {
-          chrome.storage?.local?.set({
-            wzsf_fab_pos: { left: parseInt(fab.style.left, 10), top: parseInt(fab.style.top, 10) },
-          });
-        } catch (_) {}
+        saveWidgetPos(parseInt(fab.style.top, 10), parseInt(fab.style.left, 10));
       }
     };
     document.addEventListener('mousemove', onMove, true);
@@ -2204,24 +2244,14 @@ function createFAB() {
     const panel = document.getElementById(PANEL_ID);
     if (panel) {
       panel.classList.remove('wzsf-hidden');
+      applyWidgetPos(panel);   // abre onde o FAB foi deixado
       fab.classList.add('wzsf-hidden');
     }
   });
 
-  // Restaura a posição salva (se houver), mantendo-a dentro da viewport.
-  try {
-    chrome.storage?.local?.get('wzsf_fab_pos', (r) => {
-      const pos = r?.wzsf_fab_pos;
-      if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
-        const left = Math.max(4, Math.min(pos.left, window.innerWidth  - 44));
-        const top  = Math.max(4, Math.min(pos.top,  window.innerHeight - 44));
-        fab.style.left = `${left}px`;
-        fab.style.top = `${top}px`;
-        fab.style.right = 'auto';
-        fab.style.bottom = 'auto';
-      }
-    });
-  } catch (_) {}
+  // Aplica a posição compartilhada (se já carregada); senão loadWidgetPos
+  // aplica assim que o storage responder.
+  applyWidgetPos(fab);
 
   return fab;
 }
@@ -3019,12 +3049,16 @@ function showConfirmModal(contact, action) {
           dropdown.innerHTML = `<div class="wzsf-autocomplete__empty">Nenhum modelo encontrado</div>`;
         } else {
           dropdown.innerHTML = values
-            .map(v => `<div class="wzsf-autocomplete__option" data-value="${escHtml(v.value)}">${escHtml(v.label)}</div>`)
+            .map(v => `<div class="wzsf-autocomplete__option" data-value="${escHtml(v.value)}" title="${escHtml(v.label)}">${escHtml(v.label)}</div>`)
             .join('');
           dropdown.querySelectorAll('.wzsf-autocomplete__option').forEach(opt => {
-            // mousedown + preventDefault: seleciona ANTES do blur fechar o dropdown
-            opt.addEventListener('mousedown', (e) => {
-              e.preventDefault();
+            // preventDefault no mousedown mantém o foco no input (não dispara blur).
+            // A seleção é no CLICK: assim o option AINDA existe quando o clique
+            // resolve, evitando que o clique "vaze" pro overlay e feche o modal
+            // (acontecia quando o option ficava fora dos limites da janela).
+            opt.addEventListener('mousedown', (e) => e.preventDefault());
+            opt.addEventListener('click', (e) => {
+              e.stopPropagation();
               modelValue = opt.dataset.value;
               input.value = opt.textContent;
               closeDd();
@@ -3151,6 +3185,7 @@ function makeDraggable(el) {
       header.style.cursor = 'grab';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      saveWidgetPos(el.offsetTop, el.offsetLeft); // lembra onde o painel ficou
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);

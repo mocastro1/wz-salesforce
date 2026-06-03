@@ -1117,7 +1117,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   background-color: var(--wzsf-card) !important;
   border: 1px solid var(--wzsf-border);
   border-radius: 8px;
