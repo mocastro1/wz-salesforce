@@ -737,7 +737,7 @@ function updateLeadBadge() {
 
     const modeloTexto = currentLeadInfo.modelo
       ? escHtml(currentLeadInfo.modelo)
-      : 'não informado';
+      : 'Veículo não informado';
     badge.innerHTML = `
       <div class="wzsf-lead-row">
         <a href="#" class="wzsf-lead-link" title="Abrir Lead no Salesforce">
@@ -745,7 +745,7 @@ function updateLeadBadge() {
           <span class="wzsf-lead-text">${leadLabel}: ${escHtml(currentLeadInfo.leadName || currentLeadInfo.leadId)}</span>
           <span class="wzsf-lead-status">${escHtml(currentLeadInfo.leadStatus || '')}</span>
         </a>
-        <div class="wzsf-lead-model">Modelo: ${modeloTexto}</div>
+        <div class="wzsf-lead-model">${modeloTexto}</div>
       </div>
       ${oppHtml}
     `;
