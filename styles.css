@@ -913,7 +913,10 @@
   animation: wzsf-slide-up 0.18s ease;
   color: var(--wzsf-foreground);
   color-scheme: light;
-  overflow: hidden;
+  /* visible (não hidden) para o dropdown do select poder ULTRAPASSAR os limites
+     da caixa — senão a lista de motivos fica espremida em ~3 itens. O footer
+     re-arredonda os próprios cantos de baixo (abaixo) para o visual não quebrar. */
+  overflow: visible;
 }
 .wzsf-disqualify-box { width: 300px; }
 
@@ -1100,6 +1103,10 @@
   padding: 10px 12px;
   border-top: 1px solid var(--wzsf-border);
   background: oklch(0.97 0.005 200 / 0.4);
+  /* re-arredonda os cantos de baixo: a caixa usa overflow:visible (pro dropdown
+     escapar), então o footer precisa acompanhar o border-radius da caixa. */
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
 
 /* Botões no footer: compactos */

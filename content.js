@@ -5,7 +5,9 @@
 
 const PANEL_ID = 'wzsf-panel';
 const MODAL_ID = 'wzsf-modal';
-const VERSION  = 'v2.7.7';
+// Lê a versão direto do manifest.json — assim o que aparece no painel SEMPRE
+// acompanha a versão real da extensão (sem precisar editar aqui a cada release).
+const VERSION  = 'v' + (chrome.runtime?.getManifest?.().version || '?');
 
 // ─── UI helpers ──────────────────────────────────────────────
 // Formata telefone BR para exibição: +55 65 9 9640-2200 / +55 65 9640-2200.
