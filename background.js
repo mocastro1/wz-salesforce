@@ -214,6 +214,21 @@ async function getPicklist(fieldName) {
   }
 }
 
+// Busca de modelos (Product2 ativos) para o autocomplete da criação de lead.
+// NÃO cacheia: o texto muda a cada tecla. A própria UI faz debounce.
+async function searchProducts(query) {
+  const q = (query || '').trim();
+  if (q.length < 2) return { ok: true, values: [] };
+  try {
+    const path = API_CONFIG.endpoints.productSearch + '?q=' + encodeURIComponent(q);
+    const result = await apiFetch(path, null, 'GET');
+    if (result?.ok) return { ok: true, values: result.values || [] };
+    return { ok: false, error: result?.error || 'Erro ao buscar modelos' };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 async function saveLead(data) {
   // Mapeia campos do DOM para o schema do wz-api
   const payload = {
@@ -227,6 +242,7 @@ async function saveLead(data) {
     // Concessionaria_Ref__c é resolvida pela API a partir do User SF logado
     // (Apelido_Concessionaria__c). Não enviamos daqui.
     Interesse_em__c: data.interesse || data.Interesse_em__c || undefined,
+    Modelo__c:   data.modelo || data.Modelo__c || undefined,
     Description: data.description || undefined,
     sellerPhone: data.sellerPhone || undefined,
   };
@@ -399,6 +415,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return { ok: true, ...sfUserData };
     },
     getPicklist: (msg) => getPicklist(msg?.data?.field || msg?.field || 'Interesse_em__c'),
+    searchProducts: () => searchProducts(msg?.data?.q ?? msg?.q ?? ''),
 
     disqualify:            () => disqualifyRecord(msg.data || {}),
     getDisqualifyPicklist: () => getDisqualifyPicklist(msg.data || {}),

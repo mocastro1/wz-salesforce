@@ -2254,6 +2254,7 @@ async function handleAction(action, contact, conversation, panel) {
         phone: confirmed.phone,
         name: confirmed.name,
         interesse: confirmed.interesse || undefined,
+        modelo: confirmed.modelo || undefined,
         description: `Lead capturado via WhatsApp em ${nowBR}`,
         sellerPhone,
       };
@@ -2842,6 +2843,16 @@ function showConfirmModal(contact, action) {
         </div>
       </label>` : '';
 
+    // Autocomplete de modelo (Product2) — só na criação de lead. Opcional.
+    const modelHtml = action === 'lead' ? `
+      <label class="wzsf-label">
+        Modelo do veículo
+        <div class="wzsf-autocomplete" id="wzsf-model-ac">
+          <input id="wzsf-model-input" type="text" placeholder="Digite para buscar..." autocomplete="off" />
+          <div class="wzsf-autocomplete__dropdown" id="wzsf-model-dropdown"></div>
+        </div>
+      </label>` : '';
+
     // Ícone e título por ação
     const headerMap = {
       lead: {
@@ -2883,6 +2894,7 @@ function showConfirmModal(contact, action) {
               <input id="wzsf-inp-phone" type="text" value="${escHtml(contact.phone)}" placeholder="Ex: 5511999999999" readonly />
             </label>
             ${interestHtml}
+            ${modelHtml}
           </div>
           <div class="wzsf-modal-footer">
             <button id="wzsf-cancel" class="wzsf-btn-ghost" type="button">Cancelar</button>
@@ -2934,6 +2946,61 @@ function showConfirmModal(contact, action) {
       customSelect._getValue = () => selectedValue;
     }
 
+    // ── Autocomplete de modelo (Product2) ──
+    // Usuário digita → debounce → busca no background → dropdown filtrado.
+    // Guarda o Id do Product2 escolhido; só vale se selecionado da lista.
+    const modelAc = modal.querySelector('#wzsf-model-ac');
+    if (modelAc) {
+      const input    = modelAc.querySelector('#wzsf-model-input');
+      const dropdown = modelAc.querySelector('#wzsf-model-dropdown');
+      let modelValue = '';   // Id do Product2 selecionado ('' = nenhum)
+      let debounceId = null;
+
+      const openDd  = () => modelAc.classList.add('wzsf-autocomplete--open');
+      const closeDd = () => modelAc.classList.remove('wzsf-autocomplete--open');
+
+      const renderOptions = (values) => {
+        if (!values.length) {
+          dropdown.innerHTML = `<div class="wzsf-autocomplete__empty">Nenhum modelo encontrado</div>`;
+        } else {
+          dropdown.innerHTML = values
+            .map(v => `<div class="wzsf-autocomplete__option" data-value="${escHtml(v.value)}">${escHtml(v.label)}</div>`)
+            .join('');
+          dropdown.querySelectorAll('.wzsf-autocomplete__option').forEach(opt => {
+            // mousedown + preventDefault: seleciona ANTES do blur fechar o dropdown
+            opt.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              modelValue = opt.dataset.value;
+              input.value = opt.textContent;
+              closeDd();
+            });
+          });
+        }
+        openDd();
+      };
+
+      const doSearch = async (q) => {
+        try {
+          const res = await sendMessage({ action: 'searchProducts', data: { q } });
+          if (res?.ok) renderOptions(res.values || []);
+          else { dropdown.innerHTML = `<div class="wzsf-autocomplete__empty">Erro ao buscar modelos</div>`; openDd(); }
+        } catch (_) {}
+      };
+
+      input.addEventListener('input', () => {
+        modelValue = ''; // ao digitar, invalida a seleção anterior (precisa reescolher da lista)
+        const q = input.value.trim();
+        clearTimeout(debounceId);
+        if (q.length < 2) { closeDd(); dropdown.innerHTML = ''; return; }
+        debounceId = setTimeout(() => doSearch(q), 280);
+      });
+      input.addEventListener('focus', () => { if (dropdown.children.length) openDd(); });
+      input.addEventListener('blur', () => { setTimeout(closeDd, 150); });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDd(); });
+
+      modelAc._getValue = () => modelValue;
+    }
+
     // Fecha o modal removendo todos os listeners de document
     const cleanup = () => {
       if (outsideClickHandler) {
@@ -2962,8 +3029,10 @@ function showConfirmModal(contact, action) {
       const phone = modal.querySelector('#wzsf-inp-phone').value.trim().replace(/\D/g, '');
       const customSel = modal.querySelector('#wzsf-custom-select');
       const interesse = customSel ? (customSel._getValue?.() || '') : '';
+      const modelAcEl = modal.querySelector('#wzsf-model-ac');
+      const modelo    = modelAcEl ? (modelAcEl._getValue?.() || '') : '';
       cleanup();
-      resolve({ name, phone, interesse: interesse || undefined });
+      resolve({ name, phone, interesse: interesse || undefined, modelo: modelo || undefined });
     });
 
     // Esc fecha + focus trap

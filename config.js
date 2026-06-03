@@ -14,6 +14,7 @@ const API_CONFIG = {
     saveLead:             '/api/leads',
     lookupLead:           '/api/leads/lookup',
     leadPicklist:         '/api/leads/picklist',
+    productSearch:        '/api/products/search',
     registerConversation: '/api/conversations',
     createActivity:       '/api/activities',
     healthCheck:          '/api/health',

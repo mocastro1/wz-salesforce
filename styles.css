@@ -1106,6 +1106,53 @@
 }
 .wzsf-custom-select__option--placeholder { color: var(--wzsf-muted-fg) !important; }
 
+/* Autocomplete (modelo do veículo) — input + dropdown filtrado conforme digita */
+.wzsf-autocomplete {
+  position: relative;
+  width: 100%;
+}
+.wzsf-autocomplete > input { width: 100%; box-sizing: border-box; }
+.wzsf-autocomplete__dropdown {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  background-color: var(--wzsf-card) !important;
+  border: 1px solid var(--wzsf-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.10);
+  z-index: 99999;
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wzsf-border) transparent;
+}
+.wzsf-autocomplete__dropdown::-webkit-scrollbar { width: 6px; }
+.wzsf-autocomplete__dropdown::-webkit-scrollbar-thumb { background-color: var(--wzsf-border); border-radius: 6px; }
+.wzsf-autocomplete--open .wzsf-autocomplete__dropdown { display: block; }
+.wzsf-autocomplete__option {
+  padding: 7px 10px;
+  cursor: pointer;
+  color: var(--wzsf-foreground) !important;
+  background-color: var(--wzsf-card) !important;
+  font-size: 12.5px;
+  font-family: inherit;
+  transition: background-color 80ms;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.wzsf-autocomplete__option:hover { background-color: var(--wzsf-muted) !important; }
+.wzsf-autocomplete__empty {
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--wzsf-muted-fg);
+  font-style: italic;
+}
+
 /* Footer */
 .wzsf-modal-footer {
   display: flex;
