@@ -513,7 +513,7 @@
   padding-left: 18px;
   font-size: 10px;
   line-height: 1.4;
-  color: var(--wzsf-muted-fg);
+  color: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
