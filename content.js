@@ -2157,16 +2157,71 @@ function createFAB() {
   const fab = document.createElement('button');
   fab.id = 'wzsf-fab';
   fab.className = 'wzsf-fab wzsf-hidden';
-  fab.title = 'SF Sync (Alt+S)';
+  fab.title = 'SF Sync (Alt+S) — arraste para mover';
   fab.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
 
-  fab.addEventListener('click', () => {
+  // ── Arrastar o FAB ────────────────────────────────────────────
+  // Distingue clique (abre o painel) de arraste (move): só vira "arraste"
+  // após o cursor andar mais que um limiar. A posição é salva no storage.
+  let dragged = false;
+  fab.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const rect = fab.getBoundingClientRect();
+    const offsetX = startX - rect.left;
+    const offsetY = startY - rect.top;
+    dragged = false;
+
+    const onMove = (ev) => {
+      if (!dragged && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
+      dragged = true;
+      const left = Math.max(4, Math.min(ev.clientX - offsetX, window.innerWidth  - rect.width  - 4));
+      const top  = Math.max(4, Math.min(ev.clientY - offsetY, window.innerHeight - rect.height - 4));
+      fab.style.left = `${left}px`;
+      fab.style.top = `${top}px`;
+      fab.style.right = 'auto';
+      fab.style.bottom = 'auto';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+      if (dragged) {
+        try {
+          chrome.storage?.local?.set({
+            wzsf_fab_pos: { left: parseInt(fab.style.left, 10), top: parseInt(fab.style.top, 10) },
+          });
+        } catch (_) {}
+      }
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', onUp, true);
+  });
+
+  fab.addEventListener('click', (e) => {
+    // Se acabou de arrastar, NÃO abre o painel (consome o clique).
+    if (dragged) { dragged = false; e.preventDefault(); e.stopPropagation(); return; }
     const panel = document.getElementById(PANEL_ID);
     if (panel) {
       panel.classList.remove('wzsf-hidden');
       fab.classList.add('wzsf-hidden');
     }
   });
+
+  // Restaura a posição salva (se houver), mantendo-a dentro da viewport.
+  try {
+    chrome.storage?.local?.get('wzsf_fab_pos', (r) => {
+      const pos = r?.wzsf_fab_pos;
+      if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
+        const left = Math.max(4, Math.min(pos.left, window.innerWidth  - 44));
+        const top  = Math.max(4, Math.min(pos.top,  window.innerHeight - 44));
+        fab.style.left = `${left}px`;
+        fab.style.top = `${top}px`;
+        fab.style.right = 'auto';
+        fab.style.bottom = 'auto';
+      }
+    });
+  } catch (_) {}
 
   return fab;
 }
