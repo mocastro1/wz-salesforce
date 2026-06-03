@@ -1880,11 +1880,8 @@ function createPanel() {
         </div>
       </div>
       <div class="wzsf-header-actions">
-        <button class="wzsf-btn-header" id="wzsf-minimize" aria-label="Minimizar" title="Minimizar">
+        <button class="wzsf-btn-header" id="wzsf-minimize" aria-label="Minimizar" title="Minimizar (Esc)">
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
-        </button>
-        <button class="wzsf-btn-header" id="wzsf-close" aria-label="Fechar" title="Fechar (Esc)">
-          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
     </div>
@@ -1988,7 +1985,7 @@ function createPanel() {
       <div class="wzsf-status-hint">
         <span>Pressione</span>
         <span class="wzsf-kbd">Esc</span>
-        <span>para fechar</span>
+        <span>para minimizar</span>
       </div>
     </div>
   `;
@@ -1996,19 +1993,14 @@ function createPanel() {
 
 
   // ─── Header buttons (minimize/close) ────────────────────────
+  // Só minimizar: esconde o painel e mostra o FAB (a ferramenta nunca some de
+  // vez — o botão de "fechar" foi removido para manter o acesso sempre via FAB).
   const minimizeBtn = panel.querySelector('#wzsf-minimize');
-  const closeBtn = panel.querySelector('#wzsf-close');
 
   minimizeBtn.addEventListener('click', () => {
     panel.classList.add('wzsf-hidden');
     const fab = document.getElementById('wzsf-fab');
     fab?.classList.remove('wzsf-hidden');
-  });
-
-  closeBtn.addEventListener('click', () => {
-    panel.classList.add('wzsf-hidden');
-    const fab = document.getElementById('wzsf-fab');
-    fab?.classList.add('wzsf-hidden');
   });
 
   // ─── Arrastar o painel ─────────────────────────────────────
