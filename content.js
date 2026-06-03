@@ -544,6 +544,7 @@ async function lookupLeadByPhone(phone, force = false) {
         leadId:      null,
         leadName:    oppData.oppName || 'Oportunidade ativa',
         leadStatus:  oppData.stageName || '',
+        modelo:      oppData.modelo || null,
         ownerId:     oppData.ownerId,
         ownerName:   oppData.ownerName,
         leadUrl:     oppData.oppUrl,
@@ -734,6 +735,9 @@ function updateLeadBadge() {
         </div>`;
     }
 
+    const modeloTexto = currentLeadInfo.modelo
+      ? escHtml(currentLeadInfo.modelo)
+      : 'não informado';
     badge.innerHTML = `
       <div class="wzsf-lead-row">
         <a href="#" class="wzsf-lead-link" title="Abrir Lead no Salesforce">
@@ -741,6 +745,7 @@ function updateLeadBadge() {
           <span class="wzsf-lead-text">${leadLabel}: ${escHtml(currentLeadInfo.leadName || currentLeadInfo.leadId)}</span>
           <span class="wzsf-lead-status">${escHtml(currentLeadInfo.leadStatus || '')}</span>
         </a>
+        <div class="wzsf-lead-model">Modelo: ${modeloTexto}</div>
       </div>
       ${oppHtml}
     `;

@@ -502,9 +502,21 @@
 .wzsf-lead-row {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
+}
+/* Modelo do veículo — linha de baixo, alinhada sob o nome (após o dot) */
+.wzsf-lead-model {
+  flex: 0 0 100%;
+  padding-left: 18px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--wzsf-muted-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .wzsf-lead-link {
   display: inline-flex;
