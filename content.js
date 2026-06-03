@@ -96,8 +96,18 @@ let lastLookupPhone = null;  // Último telefone pesquisado (evita re-busca desn
 // Cache de resultado por telefone, com validade (TTL). Ao navegar entre conversas,
 // voltar pra um contato visto há pouco não re-consulta o Salesforce — principal
 // ganho de velocidade ao trocar de contato. O botão Atualizar (force) ignora o cache.
-const LOOKUP_TTL_MS = 2 * 60 * 1000; // 2 minutos
+const LOOKUP_TTL_MS = 10 * 60 * 1000; // 10 minutos (cache de resultado por telefone)
 const lookupCache = new Map(); // phone -> { ts: number, data: leadInfo | null }
+
+// Debounce do lookup na troca de conversa: só consulta o SF se o usuário ficar
+// ~500ms na conversa — evita uma chamada por chat ao passar rápido por vários.
+const LOOKUP_DEBOUNCE_MS = 500;
+let lookupDebounceTimer = null;
+let lookupDebouncePhone = null;
+function cancelLookupDebounce() {
+  if (lookupDebounceTimer) { clearTimeout(lookupDebounceTimer); lookupDebounceTimer = null; }
+  lookupDebouncePhone = null;
+}
 
 // ─── Telemetry — reporta quando seletores/estratégias falham ───
 // Permite detectar mudanças no HTML do WhatsApp antes dos usuários reclamarem.
@@ -447,7 +457,8 @@ function triggerSfLogin() {
 authCheckInterval = setInterval(() => {
   if (!isContextValid()) { handleContextInvalidated(); return; }
   try { checkSfAuthStatus(); } catch (_) { handleContextInvalidated(); }
-}, 60000);
+}, 600000); // 10 min — antes 60s. Token dura horas e login/logout já é detectado
+            // na hora por evento de storage; consumia ~480 chamadas SF/dia/usuário.
 
 // Sincroniza login/logout: reage quando background salva ou remove o token
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -1714,6 +1725,7 @@ function updatePanel() {
     lastLookupPhone = null;
     lookupInProgress = false;
     currentLeadInfo = null;
+    cancelLookupDebounce();
     return;
   }
 
@@ -1748,6 +1760,7 @@ function updatePanel() {
     currentLeadInfo = null;
     lastLookupPhone = null;
     lookupInProgress = false;
+    cancelLookupDebounce();
     panel.querySelector('.wzsf-lead-badge')?.remove();
     updateDisqualifyButton();
     updateFabLeadStatus();
@@ -1852,7 +1865,19 @@ function updatePanel() {
         });
       }
       updateLeadBadge();
-      lookupLeadByPhone(contact.phone);
+      // Debounce: agenda a consulta ao SF. Se o usuário trocar de conversa antes
+      // dos ~500ms, o próximo updatePanel reagenda (cancelando esta) — só a
+      // conversa em que ele "para" chega a consultar. Evita 1 chamada por chat.
+      if (lookupDebouncePhone !== contact.phone) {
+        if (lookupDebounceTimer) clearTimeout(lookupDebounceTimer);
+        lookupDebouncePhone = contact.phone;
+        const target = contact.phone;
+        lookupDebounceTimer = setTimeout(() => {
+          lookupDebounceTimer = null;
+          lookupDebouncePhone = null;
+          lookupLeadByPhone(target);
+        }, LOOKUP_DEBOUNCE_MS);
+      }
     }
   }
 
