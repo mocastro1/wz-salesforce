@@ -1,10 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "WhatsApp → Salesforce | Grupo Cometa",
-  "version": "2.7.16",
-  "description": "Captura dados do WhatsApp Web e envia ao Salesforce via wz-api",
+  "name": "WZ Conecta — Grupo Cometa",
+  "version": "2.8.1",
+  "description": "Conecta o WhatsApp Web ao CRM corporativo: cria leads e registra conversas e atividades. Uso interno do Grupo Cometa.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0/PdYLWlhhYvMKi9W9MenFRWiWNnj2A2qStCF2yI7RkLegUprDcDRPyU5sTgod+LqJhIQsYeMTA4J7sr16zSTQ5egS+c6VWq3/H3UW7nRpeYU32f3YAV19xxhOewfJsBHOUxJ7FRtfQnq00GmD8uq/Uo/+kOzkhsIkIAh5AfecCS+tSzazEog1TAPEWbGJxQaJtlH6wmz5xJ1nXLuD2I3qAmjmf+lXjcP2fFl+r/CRVGXluk5Bg1np74vFZ/oD30+qCr/ZedPJkP5HsAuX81lsusDKGWwTumrtjpsoTp4dnQCXUybTtp6ApGIcLcNFk7NDLhG9MoCuHvAYGLplAb1wIDAQAB",
-  "permissions": ["activeTab", "storage", "identity", "tabs"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["storage", "identity", "tabs"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://wzapi.viacometa.com.br/*",
@@ -37,6 +43,12 @@
     }
   ],
   "action": {
-    "default_title": "WZ → Salesforce — Abrir WhatsApp Web"
+    "default_title": "WZ Conecta — Abrir WhatsApp Web",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }

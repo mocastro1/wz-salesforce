@@ -23,3 +23,6 @@ desktop.ini
 
 # Chave privada da extensao - NUNCA versionar
 .keys/extension-private.pem
+
+# Build da extensao (zip para a Chrome Web Store) - gerado por build-extension.ps1
+dist/

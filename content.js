@@ -824,6 +824,8 @@ const SEL = {
     '[data-testid="drawer-right"]',
     '[data-testid~="chat-info-drawer"]',
     '[data-testid~="contact-info-header"]',
+    '[data-testid~="contact-info-drawer"]',
+    'section[data-testid~="contact-info"]',
   ],
   drawerContactName: [
     '[data-testid~="contact-info-subtitle"]',
@@ -963,6 +965,11 @@ const STATUS_TEXTS = [
   'dados do perfil', 'profile info', 'profile data',
   // Strings de hora/data que podem aparecer no subtítulo
   'hoje às', 'ontem às', 'today at', 'yesterday at',
+  // Rótulos de CONTA COMERCIAL (WhatsApp Business) — aparecem no header/subtítulo
+  // junto do nome e NÃO são o nome do contato. Sem isto, a extração via DOM pode
+  // escolher o rótulo como "nome" antes de o Store devolver o verifiedName.
+  'conta comercial', 'conta empresarial', 'business account',
+  'conta oficial', 'official business account',
 ];
 
 function isStatusText(text) {
@@ -1012,6 +1019,40 @@ function extractPhoneFromDOM() {
 
   return '';
 }
+
+// ─── Detector de tela de anexo / modal nativo do WhatsApp ────────────
+// Quando o preview de mídia (tela de anexo) ou um modal nativo está aberto,
+// interação programática (clique no header, Escape global) é tratada pelo
+// WhatsApp como "sair daqui" — ele exibe o diálogo nativo de descartar a mídia.
+// Nesses momentos a extensão não deve tocar no DOM nem simular teclas.
+function isMediaComposerOpen() {
+  // ATENÇÃO: data-testid "media-canvas"/"media-caption" também são usados pela
+  // GALERIA de mídia DENTRO do drawer "Dados do contato" ("Mídia, links e docs").
+  // Quando o auto-drawer abre um contato com mídia compartilhada, esses elementos
+  // aparecem e davam falso positivo — congelando o painel para sempre.
+  // O compositor de anexo REAL fica sobre a conversa (#main), nunca no drawer.
+  // Por isso ignoramos qualquer match que esteja dentro do drawer ou de uma galeria.
+  const drawerEl = queryFirst(SEL.drawerContainer);
+  const signals = [
+    '[data-testid="media-editor"]',
+    '[data-testid*="media-canvas"]',
+    '[data-testid*="media-caption"]',
+    'div[aria-placeholder*="legenda" i]',
+    'div[aria-placeholder*="caption" i]',
+  ];
+  for (const sel of signals) {
+    try {
+      const els = document.querySelectorAll(sel);
+      for (const el of els) {
+        if (drawerEl && drawerEl.contains(el)) continue;           // galeria do drawer
+        if (el.closest('[data-testid="media-gallery"]')) continue; // qualquer galeria de mídia
+        return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+let mediaComposerWasOpen = false; // controla log de transição (1x por abertura)
 
 // ─── Auto-open do drawer "Dados do contato" para capturar telefone ───
 // Quando o contato salvo na agenda não tem mensagens trocadas, não temos data-id.
@@ -1073,7 +1114,14 @@ function setDrawerCachedPhone(name, phone) {
 async function openDrawerToReadPhone(contactName) {
   // Anti-concurrent: se já está abrindo, não tenta de novo
   if (drawerOpenInProgress) return '';
+  // Tela de anexo/modal nativo aberto: clicar no header ou simular Escape aqui
+  // faria o WhatsApp oferecer o descarte da mídia. Não interage — o updatePanel
+  // volta a tentar quando a tela fechar.
+  if (isMediaComposerOpen()) return '';
   drawerOpenInProgress = true;
+
+  // Marca se chegamos a clicar (abrir). O fechamento garantido roda no finally.
+  let didClick = false;
 
   try {
     // 1) Encontra o header da conversa (área clicável que abre o drawer)
@@ -1098,6 +1146,7 @@ async function openDrawerToReadPhone(contactName) {
 
     // 3) Clica para abrir o drawer
     clickTarget.click();
+    didClick = true;
 
     // 4) Espera o drawer renderizar (poll rápido até 500ms)
     const phone = await new Promise(resolve => {
@@ -1117,17 +1166,63 @@ async function openDrawerToReadPhone(contactName) {
       }, 20);
     });
 
-    // 5) Fecha o drawer imediatamente (Escape) — sem delay artificial
-    document.body.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true,
-    }));
-
     return phone;
   } catch (e) {
     console.warn('[WZ-SF] openDrawerToReadPhone falhou:', e.message);
     return '';
   } finally {
+    // FECHAMENTO GARANTIDO: se clicamos para abrir, fechamos — sempre, mesmo que a
+    // extração tenha falhado. openDrawerToReadPhone só é chamado quando NÃO há
+    // telefone (drawer não estava mostrando nada útil), então fechar é seguro.
+    if (didClick) {
+      try { await closeContactDrawerWeOpened(); } catch (_) {}
+    }
     drawerOpenInProgress = false;
+  }
+}
+
+// Detecta se o drawer "Dados do contato" está REALMENTE aberto.
+// ATENÇÃO: [data-testid="drawer-right"] é uma CASCA persistente — existe sempre,
+// mesmo com o drawer fechado (fica praticamente vazia: childCount 1, innerHTML ~64).
+// Por isso "existe" não basta: checamos se há CONTEÚDO real dentro.
+function isContactDrawerOpen() {
+  const d = queryFirst(SEL.drawerContainer);
+  if (!d) return false;
+  // Quando aberto, o drawer tem header com botões/ícones e o nome/telefone.
+  if (d.querySelector('[data-icon], [role="button"], [aria-label]')) return true;
+  // Fallback: conteúdo textual relevante (casca vazia tem texto vazio).
+  return d.textContent.trim().length > 3;
+}
+
+// Fecha o drawer "Dados do contato" que a EXTENSÃO abriu. Estratégia, por iteração:
+//   1) clicar no botão "Fechar"/"Voltar" do drawer (confirmado: aria-label="Fechar");
+//   2) fallback: Escape no elemento ativo + no document.
+// Para ASSIM QUE o drawer fecha (isContactDrawerOpen=false) — crucial para NÃO
+// disparar Escape com nada aberto, o que fecharia/desselecionaria a conversa.
+async function closeContactDrawerWeOpened() {
+  const closeBtnSelector =
+    '[aria-label="Fechar"], [aria-label="Close"], [aria-label="Voltar"], [aria-label="Back"], ' +
+    'button[aria-label*="echar" i], button[aria-label*="lose" i], ' +
+    'div[role="button"][aria-label*="echar" i], div[role="button"][aria-label*="oltar" i], ' +
+    '[data-icon="x"], [data-icon="x-light"], [data-icon="back"], [data-icon="back-light"]';
+
+  const sendEscape = () => {
+    const opts = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true };
+    try { (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', opts)); } catch (_) {}
+    try { document.dispatchEvent(new KeyboardEvent('keydown', opts)); } catch (_) {}
+  };
+
+  for (let i = 0; i < 10; i++) {
+    if (!isContactDrawerOpen()) return; // fechou — para (não dispara Escape à toa)
+    const drawerEl = queryFirst(SEL.drawerContainer);
+    const btn = drawerEl && drawerEl.querySelector(closeBtnSelector);
+    if (btn) {
+      // Se o match for o <span data-icon>, clica no ancestral clicável.
+      (btn.closest('[role="button"], button, [aria-label]') || btn).click();
+    } else {
+      sendEscape();
+    }
+    await new Promise(r => setTimeout(r, 100));
   }
 }
 
@@ -1711,6 +1806,22 @@ function updatePanel() {
     applyWidgetPos(panel); // restaura posição salva (painel já nasce visível)
     loadWidgetPos();       // garante carregar do storage caso ainda não tenha
     console.log('[WZ-SF] Painel + FAB criados ✅');
+  }
+
+  // Tela de anexo / modal nativo do WhatsApp aberto: congela o painel neste tick.
+  // Motivos: (1) o auto-drawer clicaria no header/simularia Escape e o WhatsApp
+  // mostraria o diálogo de descartar a mídia; (2) a tela de anexo cobre a conversa,
+  // o que faria a extração falhar e zerar/re-buscar o lead à toa ao fechar.
+  if (isMediaComposerOpen()) {
+    if (!mediaComposerWasOpen) {
+      mediaComposerWasOpen = true;
+      console.log(`[WZ-SF ${VERSION}] 📎 Tela de anexo/modal aberta — painel pausado`);
+    }
+    return;
+  }
+  if (mediaComposerWasOpen) {
+    mediaComposerWasOpen = false;
+    console.log(`[WZ-SF ${VERSION}] 📎 Tela de anexo/modal fechada — painel retomado`);
   }
 
   if (!isConversationOpen()) {
