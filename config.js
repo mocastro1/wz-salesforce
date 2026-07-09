@@ -21,6 +21,7 @@ const API_CONFIG = {
     logs:                 '/api/logs',
     authCheck:            '/api/auth/check',
     telemetry:            '/api/telemetry',
+    extensionConfig:      '/api/extension/config',
     disqualify:           '/api/disqualify',
     disqualifyPicklist:   '/api/disqualify/picklist',
   },

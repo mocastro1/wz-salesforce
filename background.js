@@ -366,6 +366,61 @@ async function flushTelemetry() {
   }
 }
 
+// ─── Config remota da extensão (seletores + flags) ────────────
+// Cache em chrome.storage.local com TTL de 6h. Padrão stale-while-revalidate:
+// responde na hora com o que tem (mesmo vencido) e renova em segundo plano —
+// o boot do content script nunca espera a rede.
+const REMOTE_CONFIG_KEY = 'wzsf_remote_config';
+const REMOTE_CONFIG_TTL_MS = 6 * 60 * 60 * 1000;
+let remoteConfigFetchInFlight = false;
+
+async function fetchRemoteConfig() {
+  if (remoteConfigFetchInFlight) return;
+  remoteConfigFetchInFlight = true;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(API_CONFIG.url('extensionConfig'), { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const body = await resp.json();
+    const cfg = body?.config;
+    // Validação mínima antes de cachear — config quebrada nunca entra no storage
+    if (!cfg || typeof cfg.version !== 'number' || typeof cfg.selectorGroups !== 'object') {
+      throw new Error('formato inválido');
+    }
+    await chrome.storage.local.set({
+      [REMOTE_CONFIG_KEY]: { config: cfg, fetchedAt: Date.now() },
+    });
+    console.log(`[WZ-SF bg] Config remota v${cfg.version} atualizada`);
+  } catch (e) {
+    // Best-effort: sem config remota, a extensão usa o fallback embutido
+    console.warn('[WZ-SF bg] Fetch da config remota falhou:', e.message);
+  } finally {
+    remoteConfigFetchInFlight = false;
+  }
+}
+
+async function getRemoteConfig() {
+  let entry = null;
+  try {
+    const r = await chrome.storage.local.get(REMOTE_CONFIG_KEY);
+    entry = r[REMOTE_CONFIG_KEY] || null;
+  } catch (_) {}
+
+  const age = entry ? Date.now() - entry.fetchedAt : Infinity;
+  if (age > REMOTE_CONFIG_TTL_MS) {
+    fetchRemoteConfig(); // renova em segundo plano; NÃO await
+  }
+  if (entry?.config) {
+    return { ok: true, config: entry.config, source: age > REMOTE_CONFIG_TTL_MS ? 'cache-stale' : 'cache' };
+  }
+  return { ok: true, config: null, reason: 'cache_empty' };
+}
+
+// Aquece o cache quando o service worker sobe (instalação, update, boot do Chrome)
+fetchRemoteConfig();
+
 // ─── Listener de mensagens ───────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const handlers = {
@@ -419,6 +474,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     disqualify:            () => disqualifyRecord(msg.data || {}),
     getDisqualifyPicklist: () => getDisqualifyPicklist(msg.data || {}),
+
+    getRemoteConfig: () => getRemoteConfig(),
 
     reportTelemetry: () => {
       const events = Array.isArray(msg.events) ? msg.events : (msg.event ? [msg.event] : []);

@@ -236,7 +236,60 @@ function requestStoreMessages(limit = 50) {
   });
 }
 
-injectPageScript();
+// ─── Config remota (seletores + flags) ──────────────────────
+// Busca no background a config servida por GET /api/extension/config
+// (cache de 6h em chrome.storage.local). Sobrescreve grupos do SEL e
+// flags de comportamento. Qualquer falha → fica no fallback embutido.
+let remoteFlags = { autoDrawerEnabled: true, storeHookEnabled: true };
+
+function isValidSelectorList(v) {
+  return Array.isArray(v) && v.length > 0 && v.length <= 20 &&
+    v.every(s => typeof s === 'string' && s.length > 0 && s.length <= 300);
+}
+
+function loadRemoteConfig() {
+  return new Promise((resolve) => {
+    // Boot não pode ficar refém do service worker: 300ms e segue no fallback.
+    const timer = setTimeout(() => resolve(), 300);
+    try {
+      chrome.runtime.sendMessage({ action: 'getRemoteConfig' }, (resp) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError || !resp?.ok || !resp.config) {
+          reportTelemetry('config_source', 'fallback', { reason: resp?.reason || 'no_remote' });
+          return resolve();
+        }
+        try {
+          const cfg = resp.config;
+          const merged = { ...SEL_FALLBACK };
+          let applied = 0;
+          for (const [group, list] of Object.entries(cfg.selectorGroups || {})) {
+            // Só grupos que a extensão conhece — grupo novo exige código novo mesmo
+            if (Object.prototype.hasOwnProperty.call(SEL_FALLBACK, group) && isValidSelectorList(list)) {
+              merged[group] = list;
+              applied++;
+            }
+          }
+          if (applied > 0) SEL = merged;
+          for (const [flag, val] of Object.entries(cfg.flags || {})) {
+            if (typeof val === 'boolean' && flag in remoteFlags) remoteFlags[flag] = val;
+          }
+          console.log(`[WZ-SF ${VERSION}] ⚙️ Config remota v${cfg.version} (${applied} grupos, ${resp.source})`);
+          reportTelemetry('config_source', 'remote', { version: cfg.version, groups: applied });
+        } catch (_) { /* config estranha → fallback já está ativo */ }
+        resolve();
+      });
+    } catch (_) { clearTimeout(timer); resolve(); }
+  });
+}
+
+loadRemoteConfig().then(() => {
+  if (remoteFlags.storeHookEnabled) {
+    injectPageScript();
+  } else {
+    storeStatus = 'unavailable';
+    console.warn(`[WZ-SF ${VERSION}] Store hook DESLIGADO via config remota — usando só DOM`);
+  }
+});
 
 // ─── Telefone do vendedor ───────────────────────────────
 // Persiste no storage para sobreviver a reloads da extensão
@@ -797,7 +850,10 @@ function updateLeadBadge() {
 }
 
 // ─── Seletores com fallback (WhatsApp muda data-testid frequentemente) ──
-const SEL = {
+// SEL_FALLBACK é a cópia embutida (plano B permanente). No boot, a config
+// remota de GET /api/extension/config pode sobrescrever grupos via SEL —
+// permite corrigir seletores quebrados SEM release na Chrome Web Store.
+const SEL_FALLBACK = {
   header: [
     '[data-testid="conversation-header"]',
     '[data-testid="chat-header"]',
@@ -837,6 +893,7 @@ const SEL = {
     '[data-testid~="selectable-text"]',
   ],
 };
+let SEL = SEL_FALLBACK;
 
 // Busca o primeiro seletor que encontra algo no DOM
 function queryFirst(selectors) {
@@ -1925,7 +1982,7 @@ function updatePanel() {
   //   1) NÃO faz em grupos (isGroupChat)
   //   2) Marca tentativas falhas para não retentar (cache negativo)
   //   3) Limite global de 1 tentativa por conversationKey
-  if (!contact.phone && contact.name && !isGroupChat() && !isLikelyGroup(contact)) {
+  if (!contact.phone && contact.name && remoteFlags.autoDrawerEnabled && !isGroupChat() && !isLikelyGroup(contact)) {
     const cached = getDrawerCachedPhone(contact.name);
     if (cached) {
       contact.phone = cached;
