@@ -1,7 +1,7 @@
 # WZ Salesforce Sync — Documentação Técnica
 
-> **Versão:** 2.2.0  
-> **Última atualização:** Julho 2025  
+> **Versão:** 2.8.2  
+> **Última atualização:** Julho 2026  
 > **Autor:** Equipe WZ / Inovação
 
 ---
@@ -173,8 +173,13 @@ A rota `GET /api/leads/picklist?field=<campo>` retorna os valores ativos de qual
 | POST | `/api/conversations` | Registra conversa no Lead |
 | POST | `/api/activities` | Cria Task (atividade) |
 | POST | `/api/contacts` | Cria/atualiza Contato |
-| GET | `/api/logs` | Logs da API em memória |
-| DELETE | `/api/logs` | Limpa buffer de logs |
+| POST | `/api/disqualify` | Desqualifica Lead/Oportunidade |
+| GET | `/api/disqualify/picklist` | Motivos de desqualificação |
+| GET | `/api/products/search?q=X` | Autocomplete de modelo (Product2, só veículos) |
+| POST | `/api/telemetry` | Recebe eventos de telemetria da extensão |
+| GET | `/api/extension/config` | Config remota de seletores + flags (ver seção 11) |
+| GET | `/api/logs` | Logs da API em memória (admin) |
+| DELETE | `/api/logs` | Limpa buffer de logs (admin) |
 
 ### Headers obrigatórios
 
@@ -370,3 +375,38 @@ docker run -d -p 3000:3000 --env-file .env wz-api
 | Buffer circular para logs | Memória controlada, sem dependência de banco de dados |
 | Zod para validação | Type-safe, integração nativa com TypeScript, mensagens de erro claras |
 | sanitizeSfId() | Defesa em profundidade — IDs SF têm formato fixo e previsível |
+
+---
+
+## 11. Config Remota de Seletores (v2.8.2)
+
+O maior risco operacional da extensão é o WhatsApp Web mudar seus `data-testid`/HTML sem aviso — o que cegava a extensão até sair release nova na Chrome Web Store (1–3 dias de review). Desde a v2.8.2, os seletores DOM e flags de comportamento vêm de um endpoint remoto, permitindo correção **sem release**.
+
+### Como funciona
+
+```text
+Boot do content script (web.whatsapp.com)
+  ↓
+pede 'getRemoteConfig' ao background (timeout 300ms — boot nunca espera rede)
+  ↓
+background responde com cache do chrome.storage.local (TTL 6h,
+stale-while-revalidate: entrega o que tem e renova em 2º plano)
+  ↓
+content valida o formato e sobrescreve os grupos do SEL + remoteFlags
+  ↓
+qualquer falha (rede, JSON inválido, grupo desconhecido)
+  → usa SEL_FALLBACK embutido (comportamento idêntico ao anterior)
+```
+
+- **Fonte:** `GET /api/extension/config` na wz-api, que lê `config/extension-config.json` (repositório wz-api).
+- **Grupos configuráveis:** `header`, `contactTitle`, `contactSub`, `drawerContainer`, `drawerContactName`, `drawerContactPhone`. Grupos desconhecidos são ignorados (grupo novo exige código novo).
+- **Flags remotas:** `autoDrawerEnabled` (desliga o auto-drawer) e `storeHookEnabled` (desliga a injeção do inject.js/Store) — "botões de pânico" acionáveis sem release.
+- **Telemetria:** cada boot reporta `config_source` = `remote` (com a version aplicada) ou `fallback` — permite acompanhar a propagação nos vendedores.
+
+### Fluxo de correção numa emergência
+
+Ver `PLAYBOOK-SELETORES.md` no repositório **wz-api**. Resumo: editar `config/extension-config.json` (seletor novo no INÍCIO do grupo, sem remover os antigos, incrementar `version`) → commit → merge na `main` → pipeline deploya → vendedores corrigidos na próxima recarga do WhatsApp Web (cache de até 6h). Tempo total: ~15–30 min, contra 1–3 dias via loja.
+
+### Validação em produção (jul/2026)
+
+Teste de quebra/conserto executado de ponta a ponta: sabotagem parcial (grupo `contactTitle`) foi absorvida pelas camadas de fallback; sabotagem total (6 grupos) cegou a detecção de conversas como esperado; conserto via merge da config correta restaurou a extensão **sem alterar nada na extensão instalada**.
